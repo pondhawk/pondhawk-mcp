@@ -1,0 +1,31 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  publish-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Build, Test, and Publish
+        run: dotnet run --project build -- --target=Publish
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            publish/win-x64/pondhawk-persistence-mcp.exe
+            publish/osx-arm64/pondhawk-persistence-mcp
+            publish/linux-x64/pondhawk-persistence-mcp
+            publish/linux-arm64/pondhawk-persistence-mcp
