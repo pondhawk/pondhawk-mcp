@@ -1,0 +1,85 @@
+{
+  "Connection": {
+    "Provider": "sqlserver",
+    "ConnectionString": "Server=localhost;Database=Inventory;Trusted_Connection=true;"
+  },
+  "OutputDir": "src/Data",
+  "DataTypes": {
+    "Uid": {
+      "ClrType": "string",
+      "MaxLength": 28,
+      "DefaultValue": "Ulid.NewUlid()"
+    },
+    "Money": {
+      "ClrType": "decimal",
+      "DefaultValue": "0m"
+    }
+  },
+  "TypeMappings": [
+    { "DbType": "char(28)", "DataType": "Uid" },
+    { "DbType": "money", "DataType": "Money" },
+    { "DbType": "tinyint", "ClrType": "byte" }
+  ],
+  "Templates": {
+    "entity": {
+      "Path": "templates/entity.generated.liquid",
+      "OutputPattern": "Entities/{{entity.Name | pascal_case}}.generated.cs",
+      "Scope": "PerModel",
+      "Mode": "Always"
+    },
+    "entity-stub": {
+      "Path": "templates/entity.stub.liquid",
+      "OutputPattern": "Entities/{{entity.Name | pascal_case}}.cs",
+      "Scope": "PerModel",
+      "Mode": "SkipExisting"
+    },
+    "dbcontext": {
+      "Path": "templates/dbcontext.generated.liquid",
+      "OutputPattern": "{{config.Defaults.ContextName}}DbContext.generated.cs",
+      "Scope": "SingleFile",
+      "Mode": "Always"
+    }
+  },
+  "Defaults": {
+    "Namespace": "MyApp.Data",
+    "ContextName": "Inventory",
+    "Schema": "dbo",
+    "IncludeViews": false,
+    "Include": ["Products", "Categories", "Orders*"],
+    "Exclude": ["__EFMigrationsHistory", "sysdiagrams"]
+  },
+  "Relationships": [
+    {
+      "DependentTable": "Products",
+      "DependentColumns": ["CategoryId"],
+      "PrincipalTable": "Categories",
+      "PrincipalColumns": ["Id"],
+      "OnDelete": "NoAction"
+    }
+  ],
+  "Logging": {
+    "Enabled": false,
+    "LogPath": ".fabrica/logs/fabrica.log",
+    "Level": "Debug",
+    "RollingInterval": "Day",
+    "RetainedFileCountLimit": 7
+  },
+  "Overrides": [
+    {
+      "Class": "*",
+      "Property": "Id",
+      "DataType": "Uid"
+    },
+    {
+      "Class": "*",
+      "Property": "CreatedAt",
+      "Artifact": "entity",
+      "Variant": "AuditTimestamp"
+    },
+    {
+      "Class": "*",
+      "Property": "RowVersion",
+      "Ignore": true
+    }
+  ]
+}

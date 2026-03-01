@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>fabrica-persistence-mcp — User Guide</title>
+<style>
+  :root {
+    --color-bg: #fdfdfd;
+    --color-surface: #ffffff;
+    --color-text: #1a1a2e;
+    --color-muted: #555;
+    --color-border: #e0e0e0;
+    --color-accent: #3a6cf4;
+    --color-accent-light: #eef2ff;
+    --color-code-bg: #f5f6f8;
+    --radius: 8px;
+    --max-width: 860px;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: var(--color-text);
+    background: var(--color-bg);
+    line-height: 1.7;
+    padding: 2rem 1rem;
+  }
+  .container { max-width: var(--max-width); margin: 0 auto; }
+  h1 { font-size: 2rem; margin-bottom: .25rem; }
+  h1 small { font-weight: 400; font-size: .55em; color: var(--color-muted); display: block; margin-top: .25rem; }
+  h2 {
+    font-size: 1.35rem; margin-top: 3rem; margin-bottom: 1rem;
+    padding-bottom: .4rem; border-bottom: 2px solid var(--color-accent);
+  }
+  h3 { font-size: 1.1rem; margin-top: 1.5rem; margin-bottom: .5rem; }
+  p, ul, ol { margin-bottom: 1rem; }
+  ul, ol { padding-left: 1.5rem; }
+  li + li { margin-top: .3rem; }
+  a { color: var(--color-accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code {
+    font-family: "Cascadia Code", "Fira Code", Consolas, monospace;
+    font-size: .9em; background: var(--color-code-bg);
+    padding: .15em .35em; border-radius: 4px;
+  }
+  pre {
+    background: var(--color-code-bg); border: 1px solid var(--color-border);
+    border-radius: var(--radius); padding: 1rem 1.25rem;
+    overflow-x: auto; margin-bottom: 1rem; line-height: 1.5;
+  }
+  pre code { background: none; padding: 0; }
+  table {
+    width: 100%; border-collapse: collapse; margin-bottom: 1rem;
+    font-size: .95rem;
+  }
+  th, td {
+    text-align: left; padding: .6rem .75rem;
+    border: 1px solid var(--color-border);
+  }
+  th { background: var(--color-accent-light); font-weight: 600; }
+  .card-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+    gap: 1rem; margin-bottom: 1rem;
+  }
+  .card {
+    border: 1px solid var(--color-border); border-radius: var(--radius);
+    padding: 1rem 1.25rem; background: var(--color-surface);
+  }
+  .card h4 {
+    font-size: 1rem; margin-bottom: .35rem;
+    font-family: "Cascadia Code", "Fira Code", Consolas, monospace;
+    color: var(--color-accent);
+  }
+  .card p { margin-bottom: .5rem; font-size: .93rem; }
+  .card .params { font-size: .85rem; color: var(--color-muted); }
+  .card .params span { display: inline-block; background: var(--color-code-bg); border-radius: 4px; padding: .1em .4em; margin: .15em .2em .15em 0; font-family: monospace; }
+  .step-number {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 1.6rem; height: 1.6rem; border-radius: 50%;
+    background: var(--color-accent); color: #fff; font-weight: 700;
+    font-size: .8rem; margin-right: .5rem; flex-shrink: 0;
+  }
+  .steps li { display: flex; align-items: flex-start; margin-bottom: .75rem; list-style: none; }
+  .steps { padding-left: 0; }
+  .tip {
+    background: var(--color-accent-light); border-left: 4px solid var(--color-accent);
+    border-radius: 0 var(--radius) var(--radius) 0;
+    padding: .75rem 1rem; margin-bottom: 1rem; font-size: .93rem;
+  }
+  nav { margin-bottom: 2rem; }
+  nav ul { list-style: none; padding: 0; display: flex; flex-wrap: wrap; gap: .4rem .75rem; }
+  nav a {
+    font-size: .9rem; padding: .25rem .5rem; border-radius: 4px;
+    background: var(--color-accent-light);
+  }
+  @media (max-width: 600px) {
+    h1 { font-size: 1.5rem; }
+    .card-grid { grid-template-columns: 1fr; }
+    nav ul { flex-direction: column; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>fabrica-persistence-mcp<small>Database introspection, code generation &amp; design-first DDL via MCP</small></h1>
+
+<nav>
+  <ul>
+    <li><a href="#what-is-mcp">What is MCP?</a></li>
+    <li><a href="#what-is-fabrica">What is fabrica-persistence-mcp?</a></li>
+    <li><a href="#installation">Installation</a></li>
+    <li><a href="#registering">Registering in Claude Code</a></li>
+    <li><a href="#getting-started">Getting Started</a></li>
+    <li><a href="#tools">Available Tools</a></li>
+    <li><a href="#design-first">Design-First Pipeline</a></li>
+    <li><a href="#configuration">Configuration Reference</a></li>
+    <li><a href="#env">Environment Variables</a></li>
+    <li><a href="#tips">Tips</a></li>
+  </ul>
+</nav>
+
+<!-- ───────────────────── What is MCP? ───────────────────── -->
+<h2 id="what-is-mcp">What is MCP?</h2>
+<p>
+  The <strong>Model Context Protocol (MCP)</strong> is an open standard that lets AI
+  assistants — such as Claude — discover and invoke external <em>tools</em> at runtime.
+  Instead of being limited to the knowledge baked into the model, an MCP server
+  exposes a set of tools that the assistant can call to read data, perform actions, or
+  generate artifacts on behalf of the user.
+</p>
+<p>
+  Each tool has a name, a description, and a typed parameter schema. The AI reads
+  these descriptions, decides which tool to call, and passes the correct arguments.
+  The tool executes locally on your machine and returns a result that the AI
+  incorporates into its response.
+</p>
+
+<!-- ───────────────────── What is fabrica? ───────────────────── -->
+<h2 id="what-is-fabrica">What is fabrica-persistence-mcp?</h2>
+<p>
+  <strong>fabrica-persistence-mcp</strong> is an MCP server that gives Claude the
+  ability to introspect relational database schemas, generate code using
+  <a href="https://shopify.github.io/liquid/">Liquid</a> templates, produce
+  dialect-specific DDL SQL, and create interactive ER diagrams. It supports
+  SQL Server, PostgreSQL, MySQL, MariaDB, and SQLite.
+</p>
+<p>It supports two complementary workflows:</p>
+<ul>
+  <li><strong>Database-first</strong> — Introspect an existing database into <code>db-design.json</code>, then generate C# code via Liquid templates.</li>
+  <li><strong>Design-first</strong> — Author <code>db-design.json</code> by hand to design a new schema, then generate DDL SQL and ER diagrams.</li>
+</ul>
+<p>Typical things you can generate include:</p>
+<ul>
+  <li>Entity / model classes</li>
+  <li>Data-access repositories</li>
+  <li>Dialect-specific DDL SQL (CREATE TABLE, indexes, foreign keys, enums)</li>
+  <li>Interactive HTML ER diagrams</li>
+  <li>API DTOs or mapping code</li>
+  <li>Any text artifact you can express as a Liquid template</li>
+</ul>
+
+<!-- ───────────────────── Installation ───────────────────── -->
+<h2 id="installation">Installation</h2>
+<p>
+  The application ships as a self-contained, single-file executable — no .NET runtime
+  required. To install:
+</p>
+<ol>
+  <li>Copy the executable to a permanent location on your machine.</li>
+  <li>
+    Either add that location to your <code>PATH</code> environment variable, or
+    reference the executable by its full absolute path when registering it as an MCP
+    server.
+  </li>
+</ol>
+
+<!-- ───────────────────── Registering ───────────────────── -->
+<h2 id="registering">Registering in Claude Code</h2>
+
+<h3>Option A — CLI</h3>
+<p>Run the following command in your terminal:</p>
+<pre><code>claude mcp add fabrica fabrica-persistence-mcp -- --project C:/projects/my-app</code></pre>
+<p>
+  Replace <code>C:/projects/my-app</code> with the path to the directory that
+  contains (or will contain) your <code>persistence.project.json</code>.
+</p>
+
+<h3>Option B — Manual JSON config</h3>
+<p>
+  Add an entry to your Claude configuration file
+  (<code>~/.claude/claude_desktop_config.json</code>):
+</p>
+<pre><code>{
+  "mcpServers": {
+    "fabrica": {
+      "command": "fabrica-persistence-mcp",
+      "args": ["--project", "C:/projects/my-app"]
+    }
+  }
+}</code></pre>
+<p>
+  If the executable is not on your <code>PATH</code>, use the full path to the
+  binary in the <code>"command"</code> field.
+</p>
+
+<!-- ───────────────────── Getting Started ───────────────────── -->
+<h2 id="getting-started">Getting Started</h2>
+<p>Once registered, open a Claude conversation and walk through these steps:</p>
+
+<ol class="steps">
+  <li>
+    <span class="step-number">1</span>
+    <div>
+      <strong>Initialize the project</strong> — Ask Claude to run the
+      <code>init</code> tool. This creates a <code>persistence.project.json</code>
+      configuration file, JSON Schema files (<code>persistence.project.schema.json</code>
+      and <code>db-design.schema.json</code>) for IDE autocompletion, starter Liquid
+      templates, a <code>.env</code> file for credentials, and an <code>AGENTS.md</code>
+      instruction file.
+    </div>
+  </li>
+  <li>
+    <span class="step-number">2</span>
+    <div>
+      <strong>Set the connection string</strong> — Open the <code>.env</code> file
+      and replace the placeholder with your real database connection string. Keep this
+      file out of version control.
+    </div>
+  </li>
+  <li>
+    <span class="step-number">3</span>
+    <div>
+      <strong>Introspect the schema</strong> — Ask Claude to run
+      <code>introspect_schema</code>. This reads the connection from your config,
+      introspects the database, and writes a <code>db-design.json</code> file containing
+      the introspected metadata about your tables, columns, keys, and indexes.
+      This file only contains what is actually in the database.
+    </div>
+  </li>
+  <li>
+    <span class="step-number">4</span>
+    <div>
+      <strong>Generate code</strong> — Ask Claude to run <code>generate</code>.
+      Templates are rendered against the <code>db-design.json</code> data, merged with
+      any explicit <code>Relationships</code> from your config, and output files are
+      written to the configured <code>OutputDir</code>. No live database connection
+      is needed for this step.
+    </div>
+  </li>
+</ol>
+
+<div class="tip">
+  After any manual edits to <code>persistence.project.json</code>, ask Claude to run
+  <code>validate_config</code> to catch errors before generating.
+</div>
+
+<div class="tip">
+  After upgrading fabrica-mcp, ask Claude to run <code>update</code> on existing
+  projects. This refreshes <code>AGENTS.md</code>,
+  <code>persistence.project.schema.json</code>, and
+  <code>db-design.schema.json</code> so Claude knows about new features
+  and IDE autocompletion stays current. All existing configuration is preserved.
+</div>
+
+<!-- ───────────────────── Available Tools ───────────────────── -->
+<h2 id="tools">Available Tools</h2>
+
+<div class="card-grid">
+
+  <div class="card">
+    <h4>init</h4>
+    <p>Creates a skeleton <code>persistence.project.json</code>, a <code>persistence.project.schema.json</code> for IDE support, starter Liquid templates, a <code>.env</code> file for database credentials, and an <code>AGENTS.md</code> file in the project directory.</p>
+    <div class="params">
+      <span>provider</span> <span>namespace</span> <span>connectionString?</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h4>introspect_schema</h4>
+    <p>Introspects the project's database connection, writes the introspected schema to <code>db-design.json</code> with <code>"Origin": "introspected"</code>, and returns a lightweight summary. Refuses to overwrite if the existing file has <code>"Origin": "design"</code>.</p>
+    <div class="params">
+      <span>schemas?</span> <span>include?</span> <span>exclude?</span> <span>includeViews?</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h4>generate</h4>
+    <p>Generates code by rendering Liquid templates against <code>db-design.json</code> data, merged with explicit <code>Relationships</code> from config, and writes generated files to disk. Run <code>introspect_schema</code> first.</p>
+    <div class="params">
+      <span>templates?</span> <span>models?</span> <span>schemas?</span> <span>includeViews?</span> <span>parameters?</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h4>generate_ddl</h4>
+    <p>Generates dialect-specific DDL SQL from <code>db-design.json</code> and writes it to a file. Supports SQL Server, PostgreSQL, MySQL, and SQLite. Handles enums, indexes, foreign keys, and auto-generated constraint names.</p>
+    <div class="params">
+      <span>provider</span> <span>output?</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h4>generate_diagram</h4>
+    <p>Generates a self-contained interactive HTML ER diagram from <code>db-design.json</code>. The diagram includes table boxes, FK relationship lines, enum boxes, and supports pan, zoom, drag, and hover highlighting.</p>
+    <div class="params">
+      <span>output?</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h4>validate_config</h4>
+    <p>Validates the project's <code>persistence.project.json</code> against its JSON Schema (catching unknown or misspelled property names) and checks referenced templates. Also validates <code>db-design.json</code> if it exists. No database connection needed.</p>
+    <div class="params">No parameters</div>
+  </div>
+
+  <div class="card">
+    <h4>list_templates</h4>
+    <p>Lists available templates from the project configuration.</p>
+    <div class="params">No parameters</div>
+  </div>
+
+  <div class="card">
+    <h4>update</h4>
+    <p>Refreshes project files after upgrading fabrica-mcp. Overwrites <code>AGENTS.md</code> with the latest agent instructions, <code>persistence.project.schema.json</code> and <code>db-design.schema.json</code> with the latest JSON Schemas, then normalizes <code>persistence.project.json</code> via a load/save round-trip to pick up new defaults. All existing configuration values are preserved.</p>
+    <div class="params">No parameters</div>
+  </div>
+
+</div>
+
+<!-- ───────────────────── Design-First Pipeline ───────────────────── -->
+<h2 id="design-first">Design-First Pipeline</h2>
+<p>
+  In addition to the database-first workflow, fabrica-mcp supports a
+  <strong>design-first</strong> pipeline where you author <code>db-design.json</code>
+  by hand to design a new database schema, then generate DDL SQL and ER diagrams.
+</p>
+
+<h3>How It Works</h3>
+<ol class="steps">
+  <li>
+    <span class="step-number">1</span>
+    <div>
+      <strong>Design the schema</strong> — Write <code>db-design.json</code> with
+      <code>"Origin": "design"</code>. Define tables, columns, primary keys, foreign keys,
+      indexes, and enums. The <code>db-design.schema.json</code> file provides IDE
+      autocompletion.
+    </div>
+  </li>
+  <li>
+    <span class="step-number">2</span>
+    <div>
+      <strong>Generate DDL</strong> — Ask Claude to run <code>generate_ddl</code>
+      with your target provider (e.g. <code>postgresql</code>). This produces a SQL
+      file with CREATE TABLE, indexes, foreign keys, and enum types in the correct
+      dialect.
+    </div>
+  </li>
+  <li>
+    <span class="step-number">3</span>
+    <div>
+      <strong>Visualize</strong> — Ask Claude to run <code>generate_diagram</code> to
+      create an interactive HTML ER diagram. Open the file in any browser to review
+      your schema visually with pan, zoom, and drag support.
+    </div>
+  </li>
+</ol>
+
+<h3>The Origin Field</h3>
+<p>
+  The <code>Origin</code> field in <code>db-design.json</code> controls overwrite
+  protection:
+</p>
+<table>
+  <thead>
+    <tr><th>Value</th><th>Set By</th><th>Meaning</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>"introspected"</code></td><td><code>introspect_schema</code></td>
+      <td>File was generated from a live database. <code>introspect_schema</code> can freely overwrite it.</td>
+    </tr>
+    <tr>
+      <td><code>"design"</code></td><td>Hand-authored</td>
+      <td>File was written for design-first use. <code>introspect_schema</code> <strong>refuses to overwrite</strong> and returns an error.</td>
+    </tr>
+  </tbody>
+</table>
+<p>
+  To switch a design-first schema back to database-first, delete
+  <code>db-design.json</code> or change <code>Origin</code> to
+  <code>"introspected"</code>.
+</p>
+
+<h3>Design-First Schema Example</h3>
+<pre><code>{
+  "$schema": "db-design.schema.json",
+  "Origin": "design",
+  "Schemas": [
+    {
+      "Name": "public",
+      "Tables": [
+        {
+          "Name": "Users",
+          "Note": "Application users",
+          "Columns": [
+            { "Name": "Id", "DataType": "int", "IsPrimaryKey": true, "IsIdentity": true },
+            { "Name": "Email", "DataType": "varchar(255)" },
+            { "Name": "Role", "DataType": "UserRole" }
+          ],
+          "PrimaryKey": { "Columns": ["Id"] },
+          "Indexes": [
+            { "Columns": ["Email"], "IsUnique": true }
+          ]
+        }
+      ]
+    }
+  ],
+  "Enums": [
+    {
+      "Name": "UserRole",
+      "Values": [
+        { "Name": "Admin" },
+        { "Name": "Editor" },
+        { "Name": "Viewer" }
+      ]
+    }
+  ]
+}</code></pre>
+
+<h3>DDL Dialect Support</h3>
+<p>The <code>generate_ddl</code> tool supports four SQL dialects with the correct syntax for each:</p>
+<table>
+  <thead>
+    <tr><th>Feature</th><th>SQL Server</th><th>PostgreSQL</th><th>MySQL</th><th>SQLite</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Identifier quoting</td><td><code>[name]</code></td><td><code>"name"</code></td><td><code>`name`</code></td><td><code>"name"</code></td></tr>
+    <tr><td>Auto-increment</td><td><code>IDENTITY(1,1)</code></td><td><code>GENERATED ALWAYS AS IDENTITY</code></td><td><code>AUTO_INCREMENT</code></td><td><code>AUTOINCREMENT</code></td></tr>
+    <tr><td>Enum handling</td><td>CHECK constraint</td><td><code>CREATE TYPE AS ENUM</code></td><td>Inline <code>ENUM(...)</code></td><td>CHECK constraint</td></tr>
+    <tr><td>Boolean type</td><td><code>bit</code></td><td><code>boolean</code></td><td><code>tinyint(1)</code></td><td><code>INTEGER</code></td></tr>
+  </tbody>
+</table>
+
+<h3>ER Diagram Features</h3>
+<p>The <code>generate_diagram</code> tool produces a self-contained HTML file with:</p>
+<ul>
+  <li><strong>Table boxes</strong> — column names, data types, and constraint icons (PK, FK, Unique, NOT NULL)</li>
+  <li><strong>FK relationship lines</strong> — SVG lines connecting foreign key columns to their referenced tables</li>
+  <li><strong>Enum boxes</strong> — distinct green-themed boxes listing enum values</li>
+  <li><strong>Interactivity</strong> — pan (drag background), zoom (scroll wheel), drag tables (drag header), hover highlight on FK lines</li>
+  <li><strong>FK-aware auto-layout</strong> — connected tables are placed adjacent to each other</li>
+</ul>
+
+<div class="tip">
+  Both <code>generate_ddl</code> and <code>generate_diagram</code> work with any
+  <code>db-design.json</code> — whether hand-authored or introspected from a database.
+  They also merge explicit <code>Relationships</code> from
+  <code>persistence.project.json</code> if the config file exists.
+</div>
+
+<!-- ───────────────────── Configuration Reference ───────────────────── -->
+<h2 id="configuration">Configuration Reference</h2>
+<p>
+  The <code>persistence.project.json</code> file is the single source of truth for
+  your project. It includes a <code>$schema</code> reference to
+  <code>persistence.project.schema.json</code>, which provides IDE autocompletion
+  and ensures that misspelled or unknown property names are caught immediately by
+  <code>validate_config</code>. It contains the following top-level sections:
+</p>
+
+<table>
+  <thead>
+    <tr><th>Section</th><th>Required</th><th>Purpose</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>Connection</code></td><td>Yes</td>
+      <td>Database connection with a <code>Provider</code> and <code>ConnectionString</code>.</td>
+    </tr>
+    <tr>
+      <td><code>OutputDir</code></td><td>Yes</td>
+      <td>Directory where generated files are written (e.g. <code>"src/Data"</code>).</td>
+    </tr>
+    <tr>
+      <td><code>Templates</code></td><td>Yes</td>
+      <td>Named template definitions with <code>Path</code>, <code>OutputPattern</code>, <code>Scope</code> (<code>PerModel</code> | <code>SingleFile</code>), <code>Mode</code> (<code>Always</code> | <code>SkipExisting</code>), and optional <code>AppliesTo</code> (<code>Tables</code> | <code>Views</code> | <code>All</code>).</td>
+    </tr>
+    <tr>
+      <td><code>Defaults</code></td><td>No</td>
+      <td>Default values for <code>Namespace</code>, <code>ContextName</code>, <code>Schema</code>, <code>IncludeViews</code>, <code>Include</code>, and <code>Exclude</code>.</td>
+    </tr>
+    <tr>
+      <td><code>DataTypes</code></td><td>No</td>
+      <td>Custom reusable type definitions (<code>ClrType</code>, optional <code>MaxLength</code> and <code>DefaultValue</code>).</td>
+    </tr>
+    <tr>
+      <td><code>TypeMappings</code></td><td>No</td>
+      <td>Maps database column types to CLR types or named <code>DataTypes</code>. Uses family-based inference: types like <code>decimal(42,2)</code> resolve via the base type <code>decimal</code> when no exact match exists.</td>
+    </tr>
+    <tr>
+      <td><code>Relationships</code></td><td>No</td>
+      <td>Explicit foreign-key relationships that supplement introspected FKs. Merged at generation time (not written to <code>db-design.json</code>).</td>
+    </tr>
+    <tr>
+      <td><code>Overrides</code></td><td>No</td>
+      <td>Per-class and per-property customizations: variant selection, <code>DataType</code> assignment, and <code>Ignore</code> flags.</td>
+    </tr>
+    <tr>
+      <td><code>Logging</code></td><td>No</td>
+      <td>Optional file-based logging (<code>Enabled</code>, <code>LogPath</code>, <code>Level</code>, <code>RollingInterval</code>, <code>RetainedFileCountLimit</code>).</td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- ───────────────────── Environment Variables ───────────────────── -->
+<h2 id="env">Environment Variables</h2>
+<p>
+  Database credentials should be kept out of version control. The
+  <code>.env</code> file, located beside <code>persistence.project.json</code>,
+  stores connection strings as simple <code>KEY=VALUE</code> pairs:
+</p>
+<pre><code># Database connection string — keep this file out of version control
+DB_CONNECTION=Server=localhost;Database=MyDatabase;Trusted_Connection=true;</code></pre>
+<p>
+  Reference variables in connection strings using <code>${VAR_NAME}</code> syntax:
+</p>
+<pre><code>"Connection": {
+  "Provider": "sqlserver",
+  "ConnectionString": "${DB_CONNECTION}"
+}</code></pre>
+<p>
+  System environment variables take precedence over values defined in
+  <code>.env</code>. If a referenced variable is missing from both sources,
+  the tool reports an error.
+</p>
+
+<!-- ───────────────────── Tips ───────────────────── -->
+<h2 id="tips">Tips</h2>
+<ul>
+  <li>
+    <strong>Validate after every edit</strong> — Always ask Claude to run
+    <code>validate_config</code> after modifying <code>persistence.project.json</code>.
+    It validates against the JSON Schema first (catching unknown or misspelled field
+    names), then checks template files and semantic rules before you generate.
+  </li>
+  <li>
+    <strong>Use overrides instead of editing templates</strong> — For per-table or
+    per-column tweaks (renaming types, ignoring columns, selecting variants) use the
+    <code>Overrides</code> section rather than forking a template.
+  </li>
+  <li>
+    <strong>Start with <code>SkipExisting</code> stubs</strong> — Create a second
+    template with <code>"Mode": "SkipExisting"</code> for hand-edited partial classes.
+    These files are generated once and never overwritten.
+  </li>
+  <li>
+    <strong>Separate table and view templates</strong> — Use
+    <code>"AppliesTo": "Tables"</code> or <code>"AppliesTo": "Views"</code> on
+    template entries so entity templates only run for tables and view templates
+    only run for views, avoiding empty output files.
+  </li>
+  <li>
+    <strong>Empty output is skipped</strong> — If a template renders to
+    whitespace-only output (e.g. because of a guard condition), no file is
+    written to disk and the file is reported as skipped.
+  </li>
+  <li>
+    <strong>Filter large schemas</strong> — Use <code>Include</code> /
+    <code>Exclude</code> patterns in Defaults or pass <code>models</code> directly to
+    <code>generate</code> to limit output to the tables you care about.
+  </li>
+  <li>
+    <strong>Review before committing</strong> — After generating, ask Claude to review
+    the output files for correctness before committing them to source control.
+  </li>
+  <li>
+    <strong>Regenerate freely</strong> — Templates with <code>"Mode": "Always"</code>
+    are designed to be overwritten. Keep manual changes in separate stub files.
+  </li>
+  <li>
+    <strong>Check <code>AGENTS.md</code></strong> — The generated
+    <code>AGENTS.md</code> file contains detailed instructions that Claude reads
+    automatically. It covers the full template syntax, custom filters, macro/variant
+    system, and override rules.
+  </li>
+  <li>
+    <strong>Run <code>update</code> after upgrading</strong> — When you install a
+    newer version of fabrica-mcp, ask Claude to run <code>update</code> on each
+    existing project. This overwrites <code>AGENTS.md</code> and
+    JSON Schema files with the latest versions and
+    normalizes your config file, all without losing any existing settings.
+  </li>
+  <li>
+    <strong>Always set <code>Origin</code> in design-first schemas</strong> — When
+    hand-authoring <code>db-design.json</code>, set <code>"Origin": "design"</code>
+    to prevent <code>introspect_schema</code> from accidentally overwriting your work.
+  </li>
+  <li>
+    <strong>Visualize before deploying</strong> — Run <code>generate_diagram</code>
+    to review your schema visually before generating DDL. It's easier to spot
+    missing relationships or naming issues in a diagram than in raw JSON.
+  </li>
+  <li>
+    <strong>Generate DDL for multiple dialects</strong> — You can run
+    <code>generate_ddl</code> multiple times with different providers to produce
+    SQL for each target database. Each run writes to a separate file
+    (e.g. <code>db-design.postgresql.sql</code>, <code>db-design.sqlite.sql</code>).
+  </li>
+</ul>
+
+<hr style="margin-top: 3rem; border: none; border-top: 1px solid var(--color-border);">
+<p style="font-size: .85rem; color: var(--color-muted); margin-top: 1rem;">
+  fabrica-persistence-mcp — Generated documentation.
+  For the complete template and configuration reference, see the <code>AGENTS.md</code> file
+  created by the <code>init</code> tool.
+</p>
+
+</div>
+</body>
+</html>

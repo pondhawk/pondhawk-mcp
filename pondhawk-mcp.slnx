@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Pondhawk.Persistence.Core/Pondhawk.Persistence.Core.csproj" />
+    <Project Path="src/Pondhawk.Persistence.Mcp/Pondhawk.Persistence.Mcp.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Pondhawk.Persistence.Core.Tests/Pondhawk.Persistence.Core.Tests.csproj" />
+    <Project Path="tests/Pondhawk.Persistence.Mcp.Tests/Pondhawk.Persistence.Mcp.Tests.csproj" />
+  </Folder>
+  <Folder Name="/build/">
+    <Project Path="build/Build.csproj" />
+  </Folder>
+</Solution>

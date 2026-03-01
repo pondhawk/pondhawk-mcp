@@ -1,0 +1,32 @@
+{
+  "Connection": {
+    "Provider": "oracle",
+    "ConnectionString": ""
+  },
+  "OutputDir": "",
+  "Templates": {
+    "entity": {
+      "Path": "",
+      "OutputPattern": "",
+      "Scope": "Invalid",
+      "Mode": "Invalid"
+    }
+  },
+  "TypeMappings": [
+    { "DbType": "int", "DataType": "NonExistent" }
+  ],
+  "Overrides": [
+    {
+      "Class": "Foo",
+      "Variant": "Bar"
+    },
+    {
+      "Class": "",
+      "DataType": "Missing"
+    }
+  ],
+  "Logging": {
+    "Level": "Trace",
+    "RollingInterval": "Second"
+  }
+}

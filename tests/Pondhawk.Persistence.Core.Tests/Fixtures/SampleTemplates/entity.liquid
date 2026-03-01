@@ -1,0 +1,17 @@
+namespace {{ config.Defaults.Namespace }}.Entities;
+
+{%- macro DefaultClass(m) %}
+public partial class {{ m.Name | pascal_case }}
+{%- endmacro %}
+
+{% dispatch entity %}
+{
+
+{%- macro DefaultProperty(a) %}
+    public {{ a.ClrType | type_nullable: a.IsNullable }} {{ a.Name | pascal_case }} { get; set; }{% if a.ClrType == "string" and a.IsNullable == false %} = null!;{% endif %}
+{%- endmacro %}
+
+{%- for a in entity.Attributes %}
+{% dispatch a %}
+{%- endfor %}
+}

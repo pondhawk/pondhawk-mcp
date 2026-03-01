@@ -1,0 +1,15 @@
+{
+  "Connection": {
+    "Provider": "sqlserver",
+    "ConnectionString": "${DB_CONNECTION}"
+  },
+  "OutputDir": "src/Data",
+  "Templates": {
+    "entity": {
+      "Path": "templates/entity.liquid",
+      "OutputPattern": "Entities/{{entity.Name}}.cs",
+      "Scope": "PerModel",
+      "Mode": "Always"
+    }
+  }
+}

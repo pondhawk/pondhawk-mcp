@@ -1,0 +1,23 @@
+{%- macro DefaultClass(m) %}
+public partial class {{ m.Name | pascal_case }}
+{%- endmacro %}
+
+{%- macro SoftDeleteClass(m) %}
+public partial class {{ m.Name | pascal_case }} : ISoftDeletable
+{%- endmacro %}
+
+{% dispatch entity %}
+{
+
+{%- macro DefaultProperty(a) %}
+    public {{ a.ClrType | type_nullable: a.IsNullable }} {{ a.Name | pascal_case }} { get; set; }
+{%- endmacro %}
+
+{%- macro AuditTimestampProperty(a) %}
+    public {{ a.ClrType | type_nullable: a.IsNullable }} {{ a.Name | pascal_case }} { get; set; } // Audit
+{%- endmacro %}
+
+{%- for a in entity.Attributes %}
+{% dispatch a %}
+{%- endfor %}
+}

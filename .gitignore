@@ -1,0 +1,19 @@
+# IDE and tool config
+.idea/
+.claude/
+.vs/
+*.user
+
+# Build output
+bin/
+obj/
+publish/
+
+# Environment secrets
+.env
+
+# Coverage reports
+coverage/
+
+# Windows artifact
+nul

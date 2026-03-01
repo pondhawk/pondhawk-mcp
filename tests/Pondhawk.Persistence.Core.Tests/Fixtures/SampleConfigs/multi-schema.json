@@ -1,0 +1,20 @@
+{
+  "Connection": {
+    "Provider": "sqlserver",
+    "ConnectionString": "Data Source=localhost;Initial Catalog=MyApp"
+  },
+  "OutputDir": "src/Data",
+  "Templates": {
+    "entity": {
+      "Path": "templates/entity.liquid",
+      "OutputPattern": "Entities/{{entity.Schema}}/{{entity.Name}}.cs",
+      "Scope": "PerModel",
+      "Mode": "Always"
+    }
+  },
+  "Defaults": {
+    "Namespace": "MyApp.Data",
+    "Schema": "dbo",
+    "IncludeViews": true
+  }
+}

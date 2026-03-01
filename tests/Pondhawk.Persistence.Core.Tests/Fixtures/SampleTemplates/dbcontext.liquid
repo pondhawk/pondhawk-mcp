@@ -1,0 +1,8 @@
+namespace {{ config.Defaults.Namespace }};
+
+public class {{ config.Defaults.ContextName }}DbContext
+{
+{%- for e in entities %}
+    public DbSet<{{ e.Name | pascal_case }}> {{ e.Name | pascal_case | pluralize }} { get; set; }
+{%- endfor %}
+}
