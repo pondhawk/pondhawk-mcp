@@ -181,9 +181,10 @@ public sealed class InitTool
         3. **generate** — Generate code by rendering templates against `db-design.json` data, merged with explicit `Relationships` from config
         4. **generate_ddl** — Generate dialect-specific DDL SQL from `db-design.json` (sqlserver, postgresql, mysql, sqlite)
         5. **generate_diagram** — Generate an interactive HTML ER diagram from `db-design.json`
-        6. **list_templates** — List available templates
-        7. **validate_config** — Validate the project configuration
-        8. **update** — Updates AGENTS.md, JSON Schema, and normalizes config after upgrading pondhawk-mcp
+        6. **generate_migration** — Generate a versioned delta migration SQL script by diffing `db-design.json` against the last snapshot
+        7. **list_templates** — List available templates
+        8. **validate_config** — Validate the project configuration
+        9. **update** — Updates AGENTS.md, JSON Schema, and normalizes config after upgrading pondhawk-mcp
 
         ## Workflow
 
@@ -329,6 +330,78 @@ public sealed class InitTool
         ```
 
         These collections include both introspected FKs from `db-design.json` and explicit `Relationships` from config, merged at generation time.
+
+        ## Migrations Workflow
+
+        pondhawk-mcp can generate **versioned delta migration scripts** by diffing `db-design.json` against the last snapshot. This eliminates hand-writing ALTER statements.
+
+        ### How It Works
+
+        1. Edit `db-design.json` to reflect the desired schema (add/remove/modify tables, columns, indexes, FKs)
+        2. Run `generate_migration` with a short description
+        3. The tool diffs against the last snapshot to produce:
+           - `V{NNN}__{slug}.sql` — delta SQL with ALTER/CREATE/DROP statements
+           - `V{NNN}__{slug}.json` — snapshot of `db-design.json` at this version
+        4. Review the generated SQL
+        5. Commit both files alongside `db-design.json`
+        6. Deploy with your migration runner (DbUp, Flyway, etc.)
+
+        ### Parameters
+
+        | Parameter | Required | Description |
+        |-----------|----------|-------------|
+        | `description` | Yes | Short description (e.g., "add orders table"). Slugified for the filename. |
+        | `provider` | No | Target dialect: `sqlserver`, `postgresql`, `mysql`, `sqlite`. Defaults to provider from `persistence.project.json`. |
+        | `output` | No | Output directory relative to project root. Default: `migrations` |
+        | `dryRun` | No | If true, compute diff and generate SQL but do not write files. Default: false |
+
+        ### First Migration (Bootstrap)
+
+        If no snapshots exist, the baseline is an empty schema. All tables produce `TableAdded` changes, equivalent to `generate_ddl` output but in migration format:
+
+        ```
+        generate_migration description="initial schema" provider="sqlserver"
+        → migrations/V001__initial_schema.sql   (CREATE TABLE statements)
+        → migrations/V001__initial_schema.json  (snapshot)
+        ```
+
+        ### Subsequent Migrations
+
+        Edit `db-design.json` (add a column, add a table, etc.) then generate:
+
+        ```
+        generate_migration description="add display name to users"
+        → migrations/V002__add_display_name_to_users.sql   (ALTER TABLE ADD COLUMN)
+        → migrations/V002__add_display_name_to_users.json  (updated snapshot)
+        ```
+
+        ### Detected Changes
+
+        The differ detects: table add/remove, column add/remove/modify, index add/remove/modify, foreign key add/remove/modify, and primary key modifications.
+
+        ### Warnings
+
+        The tool emits warnings for risky operations:
+        - **Destructive** — table or column removed (data loss risk)
+        - **PossibleRename** — column removed + similar column added (may be a rename)
+        - **DataLoss** — column type narrowed (e.g., `varchar(255)` → `varchar(50)`)
+        - **NoChanges** — baseline and desired are identical; no migration written
+
+        ### Dry Run
+
+        Use `dryRun=true` to preview changes without writing files. The response includes the generated SQL and change list.
+
+        ### Migration Directory Structure
+
+        ```
+        migrations/
+          V001__initial_schema.sql
+          V001__initial_schema.json
+          V002__add_orders_table.sql
+          V002__add_orders_table.json
+        ```
+
+        Each `.sql` has a paired `.json` snapshot. The tool validates history on each run — orphaned files (`.sql` without `.json` or vice versa) cause an error.
 
         ## Updating After Upgrade
 
