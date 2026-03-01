@@ -126,7 +126,7 @@ public abstract class DdlGeneratorBase : IDdlGenerator
         return sb.ToString();
     }
 
-    private CreateTableExpression BuildCreateTableExpression(Model model)
+    internal CreateTableExpression BuildCreateTableExpression(Model model)
     {
         var expr = new CreateTableExpression
         {
@@ -164,7 +164,7 @@ public abstract class DdlGeneratorBase : IDdlGenerator
         return expr;
     }
 
-    private CreateIndexExpression BuildCreateIndexExpression(Model model, IndexInfo idx)
+    internal CreateIndexExpression BuildCreateIndexExpression(Model model, IndexInfo idx)
     {
         var indexName = !string.IsNullOrEmpty(idx.Name)
             ? idx.Name
@@ -193,7 +193,7 @@ public abstract class DdlGeneratorBase : IDdlGenerator
         return expr;
     }
 
-    private CreateForeignKeyExpression BuildCreateForeignKeyExpression(Model model, ForeignKey fk)
+    internal CreateForeignKeyExpression BuildCreateForeignKeyExpression(Model model, ForeignKey fk)
     {
         var fkName = !string.IsNullOrEmpty(fk.Name)
             ? fk.Name
@@ -221,7 +221,7 @@ public abstract class DdlGeneratorBase : IDdlGenerator
         return expr;
     }
 
-    private static Rule MapRule(string? action) => action switch
+    internal static Rule MapRule(string? action) => action switch
     {
         "Cascade" => Rule.Cascade,
         "SetNull" => Rule.SetNull,
@@ -230,6 +230,12 @@ public abstract class DdlGeneratorBase : IDdlGenerator
         "NoAction" => Rule.None,
         _ => Rule.None
     };
+
+    internal IMigrationGenerator GetMigrationGeneratorInternal() => GetMigrationGenerator();
+
+    internal string ResolveColumnTypeInternal(Models_Attribute attr) => ResolveColumnType(attr);
+
+    internal string ProcessDefaultValueInternal(Models_Attribute attr) => ProcessDefaultValue(attr);
 
     /// <summary>
     /// Injects column notes as inline SQL comments into the generated DDL.

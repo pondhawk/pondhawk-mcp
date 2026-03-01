@@ -60,7 +60,8 @@ builder.Services
     .WithTools<ValidateConfigTool>()
     .WithTools<UpdateTool>()
     .WithTools<GenerateDdlTool>()
-    .WithTools<GenerateDiagramTool>();
+    .WithTools<GenerateDiagramTool>()
+    .WithTools<GenerateMigrationTool>();
 
 var app = builder.Build();
 await app.RunAsync();

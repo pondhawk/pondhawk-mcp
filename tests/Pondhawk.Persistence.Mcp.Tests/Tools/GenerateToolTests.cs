@@ -337,4 +337,200 @@ public class GenerateToolTests : IDisposable
         var summary = json.RootElement.GetProperty("Summary").GetString()!;
         summary.ShouldContain("failed");
     }
+
+    [Fact]
+    public void Generate_SingleFileScope_ProducesOneFile()
+    {
+        var templatesDir = Path.Combine(_tempDir, "templates");
+        Directory.CreateDirectory(templatesDir);
+        File.WriteAllText(Path.Combine(templatesDir, "all.liquid"),
+            "// Tables: {% for e in entities %}{{ e.Name }} {% endfor %}");
+
+        var config = new ProjectConfiguration
+        {
+            Connection = new ConnectionConfig { Provider = "sqlite", ConnectionString = _connString },
+            OutputDir = Path.Combine(_tempDir, "output"),
+            Templates = new Dictionary<string, TemplateConfig>
+            {
+                ["all"] = new()
+                {
+                    Path = "templates/all.liquid",
+                    OutputPattern = "AllEntities.cs",
+                    Scope = "SingleFile",
+                    Mode = "Always"
+                }
+            },
+            Defaults = new DefaultsConfig { Schema = "main" }
+        };
+        ProjectConfigurationLoader.Save(Path.Combine(_tempDir, "persistence.project.json"), config);
+
+        var ctx = new ServerContext(_tempDir);
+        IntrospectFirst(ctx);
+        var result = GenerateTool.Execute(ctx);
+        var json = JsonDocument.Parse(result);
+
+        var files = json.RootElement.GetProperty("FilesWritten");
+        files.GetArrayLength().ShouldBe(1);
+        files[0].GetProperty("Path").GetString().ShouldBe("AllEntities.cs");
+
+        var content = File.ReadAllText(Path.Combine(_tempDir, "output", "AllEntities.cs"));
+        content.ShouldContain("Products");
+        content.ShouldContain("Categories");
+    }
+
+    [Fact]
+    public void Generate_SingleFileScope_WithParameters()
+    {
+        var templatesDir = Path.Combine(_tempDir, "templates");
+        Directory.CreateDirectory(templatesDir);
+        File.WriteAllText(Path.Combine(templatesDir, "all.liquid"),
+            "// Version: {{ parameters.version }}");
+
+        var config = new ProjectConfiguration
+        {
+            Connection = new ConnectionConfig { Provider = "sqlite", ConnectionString = _connString },
+            OutputDir = Path.Combine(_tempDir, "output"),
+            Templates = new Dictionary<string, TemplateConfig>
+            {
+                ["all"] = new()
+                {
+                    Path = "templates/all.liquid",
+                    OutputPattern = "index.cs",
+                    Scope = "SingleFile",
+                    Mode = "Always"
+                }
+            },
+            Defaults = new DefaultsConfig { Schema = "main" }
+        };
+        ProjectConfigurationLoader.Save(Path.Combine(_tempDir, "persistence.project.json"), config);
+
+        var ctx = new ServerContext(_tempDir);
+        IntrospectFirst(ctx);
+        var parameters = new Dictionary<string, object> { ["version"] = "2.0" };
+        var result = GenerateTool.Execute(ctx, parameters: parameters);
+        var json = JsonDocument.Parse(result);
+
+        var content = File.ReadAllText(Path.Combine(_tempDir, "output", "index.cs"));
+        content.ShouldContain("Version: 2.0");
+    }
+
+    [Fact]
+    public void Generate_SingleFileScope_SkipExisting()
+    {
+        var templatesDir = Path.Combine(_tempDir, "templates");
+        Directory.CreateDirectory(templatesDir);
+        File.WriteAllText(Path.Combine(templatesDir, "all.liquid"), "// All entities");
+
+        var config = new ProjectConfiguration
+        {
+            Connection = new ConnectionConfig { Provider = "sqlite", ConnectionString = _connString },
+            OutputDir = Path.Combine(_tempDir, "output"),
+            Templates = new Dictionary<string, TemplateConfig>
+            {
+                ["all"] = new()
+                {
+                    Path = "templates/all.liquid",
+                    OutputPattern = "index.cs",
+                    Scope = "SingleFile",
+                    Mode = "SkipExisting"
+                }
+            },
+            Defaults = new DefaultsConfig { Schema = "main" }
+        };
+        ProjectConfigurationLoader.Save(Path.Combine(_tempDir, "persistence.project.json"), config);
+
+        var ctx = new ServerContext(_tempDir);
+        IntrospectFirst(ctx);
+
+        // First generation creates the file
+        GenerateTool.Execute(ctx);
+
+        // Second should skip
+        ctx = new ServerContext(_tempDir);
+        var result = GenerateTool.Execute(ctx);
+        var json = JsonDocument.Parse(result);
+
+        var summary = json.RootElement.GetProperty("Summary").GetString()!;
+        summary.ShouldContain("skipped");
+    }
+
+    [Fact]
+    public void Generate_SingleFileScope_Error()
+    {
+        var templatesDir = Path.Combine(_tempDir, "templates");
+        Directory.CreateDirectory(templatesDir);
+        File.WriteAllText(Path.Combine(templatesDir, "all.liquid"),
+            "{{ undefined_var.missing }}");
+
+        var config = new ProjectConfiguration
+        {
+            Connection = new ConnectionConfig { Provider = "sqlite", ConnectionString = _connString },
+            OutputDir = Path.Combine(_tempDir, "output"),
+            Templates = new Dictionary<string, TemplateConfig>
+            {
+                ["all"] = new()
+                {
+                    Path = "templates/all.liquid",
+                    OutputPattern = "index.cs",
+                    Scope = "SingleFile",
+                    Mode = "Always"
+                }
+            },
+            Defaults = new DefaultsConfig { Schema = "main" }
+        };
+        ProjectConfigurationLoader.Save(Path.Combine(_tempDir, "persistence.project.json"), config);
+
+        var ctx = new ServerContext(_tempDir);
+        IntrospectFirst(ctx);
+        var result = GenerateTool.Execute(ctx);
+        var json = JsonDocument.Parse(result);
+
+        var summary = json.RootElement.GetProperty("Summary").GetString()!;
+        summary.ShouldContain("failed");
+    }
+
+    [Fact]
+    public void Generate_SingleFileScope_Overwrite()
+    {
+        var templatesDir = Path.Combine(_tempDir, "templates");
+        Directory.CreateDirectory(templatesDir);
+        File.WriteAllText(Path.Combine(templatesDir, "all.liquid"), "// All entities v1");
+
+        var config = new ProjectConfiguration
+        {
+            Connection = new ConnectionConfig { Provider = "sqlite", ConnectionString = _connString },
+            OutputDir = Path.Combine(_tempDir, "output"),
+            Templates = new Dictionary<string, TemplateConfig>
+            {
+                ["all"] = new()
+                {
+                    Path = "templates/all.liquid",
+                    OutputPattern = "index.cs",
+                    Scope = "SingleFile",
+                    Mode = "Always"
+                }
+            },
+            Defaults = new DefaultsConfig { Schema = "main" }
+        };
+        ProjectConfigurationLoader.Save(Path.Combine(_tempDir, "persistence.project.json"), config);
+
+        var ctx = new ServerContext(_tempDir);
+        IntrospectFirst(ctx);
+
+        // First generation creates the file
+        GenerateTool.Execute(ctx);
+        File.Exists(Path.Combine(_tempDir, "output", "index.cs")).ShouldBeTrue();
+
+        // Update template and regenerate — should overwrite
+        File.WriteAllText(Path.Combine(templatesDir, "all.liquid"), "// All entities v2");
+        ctx = new ServerContext(_tempDir);
+        var result = GenerateTool.Execute(ctx);
+        var json = JsonDocument.Parse(result);
+
+        var summary = json.RootElement.GetProperty("Summary").GetString()!;
+        summary.ShouldContain("written");
+
+        var content = File.ReadAllText(Path.Combine(_tempDir, "output", "index.cs"));
+        content.ShouldContain("v2");
+    }
 }
