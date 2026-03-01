@@ -21,14 +21,21 @@ jobs:
       - name: Build, Test, and Publish
         run: dotnet run --project build -- --target=Publish
 
+      - name: Rename binaries with platform suffixes
+        run: |
+          cp publish/win-x64/pondhawk-persistence-mcp.exe publish/pondhawk-persistence-mcp-win-x64.exe
+          cp publish/osx-arm64/pondhawk-persistence-mcp publish/pondhawk-persistence-mcp-osx-arm64
+          cp publish/linux-x64/pondhawk-persistence-mcp publish/pondhawk-persistence-mcp-linux-x64
+          cp publish/linux-arm64/pondhawk-persistence-mcp publish/pondhawk-persistence-mcp-linux-arm64
+
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: >
           gh release create "${{ github.ref_name }}"
-          publish/win-x64/pondhawk-persistence-mcp.exe
-          publish/osx-arm64/pondhawk-persistence-mcp
-          publish/linux-x64/pondhawk-persistence-mcp
-          publish/linux-arm64/pondhawk-persistence-mcp
+          publish/pondhawk-persistence-mcp-win-x64.exe
+          publish/pondhawk-persistence-mcp-osx-arm64
+          publish/pondhawk-persistence-mcp-linux-x64
+          publish/pondhawk-persistence-mcp-linux-arm64
           --title "${{ github.ref_name }}"
           --generate-notes
