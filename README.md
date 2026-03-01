@@ -9,6 +9,7 @@ pondhawk-mcp bridges the gap between existing database schemas and modern .NET c
 - **Schema Introspection** — Connects to SQL Server, PostgreSQL, MySQL/MariaDB, or SQLite databases and reads table/view/column/FK/index metadata into a portable `db-design.json` file
 - **Template-Driven Code Generation** — Renders Liquid templates against schema data to produce EF Core entities, DTOs, DbContext classes, or any other code artifact you define
 - **Design-First DDL Generation** — Generates dialect-specific SQL DDL from a hand-authored `db-design.json` for deploying new databases
+- **Delta Migration Generation** — Diffs `db-design.json` against the last snapshot to produce versioned SQL migration scripts with paired snapshots, ready for deployment with DbUp, Flyway, or similar tools
 - **ER Diagram Generation** — Produces interactive HTML ER diagrams with pan, zoom, drag, and search — no external dependencies
 - **Variant Override System** — Per-class and per-property control over generated code, scoped to individual templates, via a declarative override/macro/dispatch pipeline
 
@@ -78,6 +79,7 @@ This renders your Liquid templates against the schema data and writes files to d
 | `introspect_schema` | Reads database schema into `db-design.json` and auto-populates type mappings |
 | `generate` | Renders Liquid templates against schema data and writes generated files |
 | `generate_ddl` | Generates dialect-specific DDL SQL from `db-design.json` |
+| `generate_migration` | Generates versioned delta migration SQL by diffing `db-design.json` against the last snapshot |
 | `generate_diagram` | Generates an interactive HTML ER diagram from `db-design.json` |
 | `list_templates` | Lists all configured templates with their settings |
 | `validate_config` | Validates project configuration without a database connection |
@@ -158,6 +160,30 @@ Generate an ER diagram         →  db-design.html
 ```
 
 Both tools work with any `db-design.json` — introspected or hand-designed.
+
+### Migrations Workflow
+
+For evolving an existing schema, edit `db-design.json` and generate delta migrations:
+
+```
+Add a DisplayName column to Users    →  generate_migration "add display name"
+```
+
+This diffs `db-design.json` against the last snapshot and produces:
+
+```
+migrations/
+  V001__initial_schema.sql        ← CREATE TABLE statements (bootstrap)
+  V001__initial_schema.json       ← snapshot of db-design.json at V001
+  V002__add_display_name.sql      ← ALTER TABLE ADD COLUMN (delta)
+  V002__add_display_name.json     ← snapshot at V002
+```
+
+Each `.sql` file contains numbered, commented statements ready for deployment with DbUp, Flyway, or similar migration runners. The paired `.json` snapshot serves as the baseline for the next migration — no database connection or git history required.
+
+The tool detects 12 change types (table add/remove, column add/remove/modify, index add/remove/modify, FK add/remove/modify, PK modify) and emits warnings for destructive operations, possible renames, and data loss.
+
+Use `dryRun: true` to preview changes without writing files.
 
 ## Project Configuration
 
@@ -285,7 +311,7 @@ The `Publish` target produces self-contained single-file executables (no .NET ru
 
 The solution is split into two projects:
 
-- **Pondhawk.Persistence.Core** — Class library with all core functionality (schema introspection, template rendering, DDL generation, diagram generation, caching, logging)
+- **Pondhawk.Persistence.Core** — Class library with all core functionality (schema introspection, template rendering, DDL generation, migration generation, diagram generation, caching, logging)
 - **Pondhawk.Persistence.Mcp** — Thin MCP server layer that wraps core library methods as MCP tools
 
 This separation allows the core library to be reused by other modalities (e.g., a CLI tool) without depending on MCP.

@@ -40,11 +40,12 @@ pondhawk-mcp exposes database schema introspection and template-driven code gene
 - Keep templates, schema, and project configuration as version-controlled project assets
 - Support design-first schema authoring: generate dialect-specific DDL SQL from `db-design.json` for deploying new databases
 - Generate interactive HTML ER diagrams from `db-design.json` for visual schema review
+- Generate versioned delta migration scripts by diffing `db-design.json` against the last snapshot, producing numbered SQL files with paired JSON snapshots for repeatable deployments
 
 ### Non-Goals
 
 - Providing a UI or CLI beyond the MCP server interface
-- Runtime ORM functionality or database migration support (note: one-shot DDL generation for initial schema deployment is a goal; incremental migration scripts are not)
+- Runtime ORM functionality or database migration execution (the server generates migration SQL files; running them against a database is the responsibility of a deployment tool such as DbUp, Flyway, or a custom CLI)
 - Supporting non-relational databases
 - Template authoring tools or visual template editors
 
@@ -149,6 +150,13 @@ pondhawk-mcp.slnx
 │   │   │   └── DdlTypeMapper.cs             (generic-to-dialect type mappings)
 │   │   ├── Diagrams/                         ← ER diagram generation (see section 16)
 │   │   │   └── DiagramGenerator.cs           (HTML ER diagram generator)
+│   │   ├── Migrations/                       ← delta migration generation (see section 17)
+│   │   │   ├── SchemaChange.cs              (change type records: TableAdded, ColumnModified, etc.)
+│   │   │   ├── MigrationWarning.cs          (warning types: Destructive, PossibleRename, DataLoss, NoChanges)
+│   │   │   ├── SchemaDiffer.cs              (pure-function diff: List<Model> → List<SchemaChange>)
+│   │   │   ├── MigrationSqlGenerator.cs     (renders changes as provider-specific SQL via FluentMigrator)
+│   │   │   ├── MigrationSqlRenderer.cs      (assembles final SQL file with header + numbered statements)
+│   │   │   └── MigrationFileManager.cs      (versioning, file naming, snapshot I/O, history validation)
 │   │   ├── Logging/
 │   │   │   └── LoggingService.cs             (Serilog setup, MEL integration, config-driven init)
 │   │   └── Caching/
@@ -162,6 +170,7 @@ pondhawk-mcp.slnx
 │           ├── GenerateTool.cs
 │           ├── GenerateDdlTool.cs            ← new (see section 16)
 │           ├── GenerateDiagramTool.cs        ← new (see section 16)
+│           ├── GenerateMigrationTool.cs     ← new (see section 17)
 │           ├── ListTemplatesTool.cs
 │           ├── ValidateConfigTool.cs
 │           └── UpdateTool.cs
@@ -193,6 +202,11 @@ pondhawk-mcp.slnx
 │   │   │   └── DdlTypeMapperTests.cs
 │   │   ├── Diagrams/                         ← new (see section 16)
 │   │   │   └── DiagramGeneratorTests.cs
+│   │   ├── Migrations/                       ← new (see section 17)
+│   │   │   ├── SchemaDifferTests.cs
+│   │   │   ├── MigrationSqlGeneratorTests.cs
+│   │   │   ├── MigrationSqlRendererTests.cs
+│   │   │   └── MigrationFileManagerTests.cs
 │   │   ├── Caching/
 │   │   │   └── TimestampCacheTests.cs
 │   │   ├── Logging/
@@ -211,6 +225,7 @@ pondhawk-mcp.slnx
 │           ├── GenerateToolTests.cs
 │           ├── GenerateDdlToolTests.cs       ← new (see section 16)
 │           ├── GenerateDiagramToolTests.cs   ← new (see section 16)
+│           ├── GenerateMigrationToolTests.cs ← new (see section 17)
 │           ├── ListTemplatesToolTests.cs
 │           ├── ValidateConfigToolTests.cs
 │           └── UpdateToolTests.cs
@@ -235,6 +250,7 @@ pondhawk-mcp.slnx
 | Template compilation + rendering | Yes | |
 | Dispatch tag + macros | Yes | |
 | DDL generation (per-dialect SQL) | Yes | |
+| Delta migration generation | Yes | |
 | HTML ER diagram generation | Yes | |
 | File writing | Yes | |
 | Caching with timestamp invalidation | Yes | |
@@ -1028,6 +1044,124 @@ Refreshes project files after upgrading pondhawk-mcp. When the MCP server is upg
   ],
   "Message": "Project files updated to the latest version. AGENTS.md and JSON Schemas are current; config has been normalized."
 }
+```
+
+---
+
+### 6.7 `generate_migration`
+
+Generates a versioned delta migration SQL script by diffing `db-design.json` against the last snapshot. Each migration produces a paired `.sql` and `.json` file in the migrations directory.
+
+**Parameters:**
+
+| Parameter     | Type     | Required | Description                                                                                                      |
+| ------------- | -------- | -------- | ---------------------------------------------------------------------------------------------------------------- |
+| `description` | `string` | Yes      | Short description of the migration (e.g., "add orders table"). Slugified for the filename.                       |
+| `provider`    | `string` | No       | Target database dialect: `sqlserver`, `postgresql`, `mysql`, `sqlite`. Defaults to provider from `persistence.project.json`. |
+| `output`      | `string` | No       | Output directory for migration files, relative to project root. Default: `migrations`                            |
+| `dryRun`      | `bool`   | No       | If true, compute diff and generate SQL but do not write files. Default: `false`                                  |
+
+**Behavior:**
+
+1. Reads `db-design.json` from the project directory
+2. Validates `db-design.json` against the JSON Schema; returns structured errors on failure
+3. Resolves provider from `persistence.project.json` if not specified as a parameter
+4. Validates migration history — ensures every `.sql` has a matching `.json` snapshot and vice versa
+5. Loads the baseline schema from the latest snapshot (e.g., `V002__*.json`); if no snapshots exist, baseline is an empty schema (bootstrap)
+6. Diffs the baseline against the desired schema (`db-design.json`) to produce a list of `SchemaChange` records and `MigrationWarning` records
+7. Generates provider-specific SQL for each change using FluentMigrator expression generators
+8. Renders the migration file with a header block (migration name, timestamp, provider, change summary, warnings) and numbered SQL statements
+9. Unless `dryRun` is true or there are no changes, writes two files:
+   - `V{NNN}__{slug}.sql` — the delta migration SQL
+   - `V{NNN}__{slug}.json` — a snapshot of `db-design.json` at this version (serves as the baseline for the next migration)
+10. Returns a JSON result
+
+**Versioning:**
+
+- Versions are sequential integers: `V001`, `V002`, `V003`, ...
+- Zero-padded to 3 digits (expands to 4+ digits if exceeding 999)
+- Determined by scanning the output directory for existing migration files and incrementing from the highest
+
+**Schema Diffing — Detected Changes:**
+
+| Change Type        | Detection                                    | SQL Generated                |
+| ------------------ | -------------------------------------------- | ---------------------------- |
+| `TableAdded`       | In desired but not baseline                  | `CREATE TABLE`               |
+| `TableRemoved`     | In baseline but not desired                  | `DROP TABLE`                 |
+| `ColumnAdded`      | New column in a table                        | `ALTER TABLE ADD COLUMN`     |
+| `ColumnRemoved`    | Column removed from a table                  | `ALTER TABLE DROP COLUMN`    |
+| `ColumnModified`   | Column exists but properties differ          | `ALTER TABLE ALTER COLUMN`   |
+| `IndexAdded`       | New index                                    | `CREATE INDEX`               |
+| `IndexRemoved`     | Index removed                                | `DROP INDEX`                 |
+| `IndexModified`    | Index definition changed                     | `DROP INDEX` + `CREATE INDEX`|
+| `ForeignKeyAdded`  | New FK constraint                            | `ALTER TABLE ADD CONSTRAINT` |
+| `ForeignKeyRemoved`| FK removed                                   | `ALTER TABLE DROP CONSTRAINT`|
+| `ForeignKeyModified`| FK definition changed                       | `DROP` + `ADD CONSTRAINT`    |
+| `PrimaryKeyModified`| PK columns changed                          | `DROP PK` + `ADD PK`         |
+
+**Warnings:**
+
+| Type            | Meaning                                                                          |
+| --------------- | -------------------------------------------------------------------------------- |
+| `Destructive`   | Table or column removed — potential data loss                                    |
+| `PossibleRename`| Column removed + similar column added in same table — may be a rename, not drop/add |
+| `DataLoss`      | Column type narrowed (e.g., `varchar(255)` → `varchar(50)`)                      |
+| `NoChanges`     | Baseline and desired are identical — no migration needed                         |
+
+**Statement Ordering:**
+
+Drops are emitted first (FKs → indexes → columns → PKs → tables), then creates (tables → columns → modified columns → indexes → FKs). This ensures referential integrity during migration execution.
+
+**Returns:**
+
+```json
+{
+  "MigrationFile": "migrations/V002__add_orders_table.sql",
+  "SnapshotFile": "migrations/V002__add_orders_table.json",
+  "Version": 2,
+  "Changes": [
+    { "Type": "TableAdded", "Description": "Add table dbo.Orders" },
+    { "Type": "ColumnAdded", "Description": "Add column dbo.Users.DisplayName" }
+  ],
+  "Warnings": [],
+  "Sql": "-- V002__add_orders_table\n-- Generated: 2026-03-01 ...\n\n-- [1] Add table dbo.Orders\nCREATE TABLE ...",
+  "DryRun": false
+}
+```
+
+When there are no changes:
+
+```json
+{
+  "MigrationFile": null,
+  "SnapshotFile": null,
+  "Version": null,
+  "Changes": [],
+  "Warnings": [{ "Type": "NoChanges", "Message": "No schema changes detected" }],
+  "Sql": "",
+  "DryRun": false
+}
+```
+
+**Errors:**
+
+| Scenario | Error Message |
+|----------|--------------|
+| `db-design.json` not found | `"db-design.json not found in project directory. Create it manually for design-first use, or run introspect_schema to generate it from an existing database."` |
+| `db-design.json` fails JSON Schema validation | Structured errors with field paths and violation descriptions |
+| Provider not specified and not in config | `"Provider not specified. Pass it as a parameter or set it in persistence.project.json connection.provider."` |
+| Corrupt migration history (orphan `.sql` or `.json`) | `"Migration history validation failed"` with details |
+
+**Migration Directory Structure:**
+
+```
+migrations/
+  V001__initial_schema.sql        ← full CREATE for bootstrap
+  V001__initial_schema.json       ← snapshot of db-design.json at V001
+  V002__add_orders_table.sql      ← delta ALTER statements
+  V002__add_orders_table.json     ← snapshot at V002
+  V003__add_billing_columns.sql   ← delta ALTER statements
+  V003__add_billing_columns.json  ← snapshot at V003
 ```
 
 ---
@@ -2397,10 +2531,8 @@ The following are explicitly out of scope for the initial version but may be con
 - **Incremental generation**: Detecting schema changes and regenerating only affected files
 - **Template marketplace**: Sharing and discovering community templates
 - **Additional providers**: Oracle, CockroachDB (partial PostgreSQL wire-compatibility exists via Npgsql but is not officially supported)
-- **Schema diffing**: Comparing schema versions and generating migration code
 - **Many-to-many skip navigations**: Detecting junction tables and generating direct skip navigation properties (e.g., `Product.Tags` bypassing `ProductTag`). Many-to-many via explicit junction entities already works with the current `ForeignKeys[]` / `ReferencingForeignKeys[]` model
 - **Multi-schema DDL**: Generating DDL that spans multiple database schemas with `CREATE SCHEMA` statements
-- **Migration diffing**: Comparing two `db-design.json` versions and generating `ALTER TABLE` migration scripts
 - **`COMMENT ON` support**: Using PostgreSQL and MySQL native `COMMENT ON` statements for table/column notes instead of SQL comments
 - **DBML import/export**: Importing from or exporting to DBML format for interoperability with dbdiagram.io and other tools
 
@@ -2422,8 +2554,10 @@ Both new capabilities work with **any** `db-design.json` — whether hand-design
 **Pipeline summary:**
 
 ```
-Design-first:     Claude writes db-design.json → generate_ddl   → DDL SQL file → deploy to database
-                   Claude writes db-design.json → generate_diagram → interactive HTML ER diagram
+Design-first:     Claude writes db-design.json → generate_ddl       → DDL SQL file → deploy to database
+                   Claude writes db-design.json → generate_diagram   → interactive HTML ER diagram
+
+Migrations:        Edit db-design.json           → generate_migration → versioned delta SQL + snapshot
 
 Database-first:   introspect_schema → db-design.json → generate → C# code (unchanged)
 ```
@@ -2888,6 +3022,170 @@ tests/Pondhawk.Persistence.Mcp.Tests/
 - **MCP tools:** `generate_ddl` requires provider, defaults work, errors on missing `db-design.json`, works without config, merges Relationships when config exists
 - **Origin-based overwrite protection:** `introspect_schema` writes `"Origin": "introspected"`; refuses to overwrite when `Origin` is `"design"`; missing `Origin` treated as `"introspected"` for backward compatibility
 - **Schema.json extensions:** enums, notes, OnUpdate — all optional, backward compatible
+
+---
+
+## 17. Delta Migration Generation
+
+### 17.1 Feature Overview
+
+pondhawk-mcp supports **automated delta migration generation** — developers or AI agents edit `db-design.json` to reflect the desired schema, then call `generate_migration` to produce versioned SQL ALTER scripts by diffing against the last snapshot. This eliminates hand-writing ALTER statements and ensures migrations are consistent with the schema definition.
+
+Each migration is a pair of files: a `.sql` file containing the delta DDL, and a `.json` snapshot of `db-design.json` at that version. The snapshot serves as the baseline for the next migration, requiring no database connection or git history.
+
+**Pipeline:**
+
+```
+Edit db-design.json → generate_migration → V{NNN}__{slug}.sql + V{NNN}__{slug}.json
+```
+
+The generated SQL files are designed for use with migration runners such as DbUp, Flyway, or custom CLI tools. The tool generates migration scripts; executing them against a database is the responsibility of the deployment pipeline.
+
+### 17.2 Architecture
+
+Six components in `Pondhawk.Persistence.Core/Migrations/`:
+
+| Component | Responsibility |
+|-----------|----------------|
+| `SchemaChange` | Sealed record types representing each detectable schema change (12 types) |
+| `MigrationWarning` | Warning types for destructive operations, possible renames, data loss, and no-change scenarios |
+| `SchemaDiffer` | Pure-function diff engine comparing two `List<Model>` to produce changes and warnings |
+| `MigrationSqlGenerator` | Renders `SchemaChange` records as provider-specific SQL using FluentMigrator expression generators |
+| `MigrationSqlRenderer` | Assembles the final SQL file with a header comment block and numbered statements |
+| `MigrationFileManager` | Handles version numbering, file naming, snapshot I/O, and migration history validation |
+
+Plus `GenerateMigrationTool` in `Pondhawk.Persistence.Mcp/Tools/` — the MCP tool that orchestrates the pipeline.
+
+### 17.3 Schema Differ
+
+`SchemaDiffer.Diff(List<Model> baseline, List<Model> desired)` returns `(List<SchemaChange>, List<MigrationWarning>)`.
+
+**Algorithm:**
+
+1. Filter out views (migrations apply to tables only)
+2. Build case-insensitive dictionaries keyed by `schema.tablename`
+3. Detect table additions and removals
+4. For matching tables, diff columns, indexes, foreign keys, and primary key
+
+**Column comparison properties:** `DataType`, `IsNullable`, `DefaultValue`, `MaxLength`, `Precision`, `Scale`, `IsIdentity`
+
+**Index comparison:** Columns (order-sensitive), `IsUnique`
+
+**Foreign key comparison:** `Columns`, `PrincipalTable`, `PrincipalSchema`, `PrincipalColumns`, `OnDelete`, `OnUpdate`
+
+**Primary key comparison:** Columns as ordered list
+
+**Warning detection:**
+- Column removed + column added in same table with same data type → `PossibleRename` warning
+- `MaxLength` or `Precision` narrowed → `DataLoss` warning
+- Table or column removed → `Destructive` warning
+
+**Output ordering:** Drops first (FKs → indexes → columns → PKs → tables), then creates (tables → columns → modified → indexes → FKs). This preserves referential integrity.
+
+### 17.4 SQL Generation
+
+`MigrationSqlGenerator` casts the provider's `IDdlGenerator` to `DdlGeneratorBase` to access internal expression-building methods. For each `SchemaChange`, it builds FluentMigrator expressions and passes them through the provider's `IMigrationGenerator.Generate()` for dialect-specific SQL output.
+
+Composite changes (e.g., `IndexModified`, `ForeignKeyModified`, `PrimaryKeyModified`) use a DROP + CREATE pattern, producing two SQL statements.
+
+**SQLite limitations:** FluentMigrator's SQLite generator does not support `ALTER COLUMN`, separate `CREATE`/`DROP FOREIGN KEY`, or `DELETE CONSTRAINT` operations. These change types will throw for the `sqlite` provider.
+
+### 17.5 File Format
+
+**SQL migration file:**
+
+```sql
+-- Migration: V002__add_orders_table
+-- Generated: 2026-03-01 14:32:10 UTC
+-- Provider:  sqlserver
+--
+-- Changes:
+--   Add table dbo.Orders
+--   Add column dbo.Users.DisplayName
+--
+-- Warnings:
+--   [Destructive] Column 'OldField' removed from table 'Users'
+
+-- [1] Add table dbo.Orders
+CREATE TABLE [dbo].[Orders] ([Id] INT NOT NULL IDENTITY(1,1), ...);
+
+-- [2] Add column dbo.Users.DisplayName
+ALTER TABLE [dbo].[Users] ADD [DisplayName] VARCHAR(100) NOT NULL;
+```
+
+**Snapshot file:** A copy of `db-design.json` serialized via `SchemaFileMapper` at the time the migration was generated. Used as the baseline for the next `generate_migration` call.
+
+### 17.6 Solution Structure Additions
+
+```
+src/Pondhawk.Persistence.Core/
+├── Migrations/                            ← new directory
+│   ├── SchemaChange.cs                   (abstract record + 12 sealed concrete records)
+│   ├── MigrationWarning.cs              (sealed record with WarningType enum)
+│   ├── SchemaDiffer.cs                  (static Diff method)
+│   ├── MigrationSqlGenerator.cs         (static Generate method)
+│   ├── MigrationSqlRenderer.cs          (static Render method)
+│   └── MigrationFileManager.cs          (versioning, file I/O, history validation)
+
+src/Pondhawk.Persistence.Mcp/
+├── Tools/
+│   └── GenerateMigrationTool.cs          ← new
+
+tests/Pondhawk.Persistence.Core.Tests/
+├── Migrations/                            ← new directory
+│   ├── SchemaDifferTests.cs
+│   ├── MigrationSqlGeneratorTests.cs
+│   ├── MigrationSqlRendererTests.cs
+│   └── MigrationFileManagerTests.cs
+
+tests/Pondhawk.Persistence.Mcp.Tests/
+├── Tools/
+│   └── GenerateMigrationToolTests.cs     ← new
+```
+
+### 17.7 Acceptance Criteria
+
+- **Schema diffing:** Detects all 12 change types (table add/remove, column add/remove/modify, index add/remove/modify, FK add/remove/modify, PK modify)
+- **Warnings:** Generates `Destructive`, `PossibleRename`, `DataLoss`, and `NoChanges` warnings correctly
+- **SQL generation:** Produces valid, provider-specific SQL for all 4 providers (sqlserver, postgresql, mysql, sqlite) across all supported change types
+- **File management:** Correct version incrementing, slug generation, history validation, paired `.sql`/`.json` file creation
+- **Bootstrap:** First migration with no existing snapshots treats baseline as empty schema and generates full `CREATE TABLE` statements
+- **Dry run:** `dryRun=true` computes diff and generates SQL but does not write files
+- **No changes:** When baseline and desired are identical, returns `NoChanges` warning and writes no files
+- **Provider resolution:** Falls back to `persistence.project.json` connection provider when `provider` parameter is omitted
+- **History validation:** Detects orphan `.sql` or `.json` files (missing their pair) and returns a clear error
+
+### 17.8 Testing Strategy
+
+#### SchemaDiffer Tests
+
+Comprehensive tests covering: table add/remove, column add/remove/modify (each property), index add/remove/modify, FK add/remove/modify, PK modify, warnings (Destructive, PossibleRename, DataLoss), empty baseline bootstrap, views excluded, no changes, multi-schema, ordering.
+
+#### MigrationSqlGenerator Tests
+
+Theory tests across all 4 providers for each change type generating valid SQL. SQLite excluded from tests for unsupported operations (ALTER COLUMN, FK operations, PK constraint operations).
+
+#### MigrationSqlRenderer Tests
+
+Tests for header comment block, numbered statements, warning output, semicolon termination.
+
+#### MigrationFileManager Tests
+
+Temp directory tests with IDisposable cleanup covering: version incrementing, snapshot loading, history validation (valid, orphan SQL, orphan JSON), file writing, slug generation, version formatting.
+
+#### GenerateMigrationTool Integration Tests
+
+End-to-end tests covering: first migration bootstrap, second migration with schema changes, dry run mode, no changes scenario, missing `db-design.json`, corrupt migration history, provider from config, validation errors, response JSON shape, custom output directory.
+
+### 17.9 Error Handling
+
+| Scenario | Behavior |
+|----------|----------|
+| `db-design.json` not found | Error with instructions: create manually or run `introspect_schema` |
+| `db-design.json` fails JSON Schema validation | Error with field paths and violation descriptions |
+| Provider not specified and not in config | Error listing both ways to specify a provider |
+| Corrupt migration history | Error listing orphaned files |
+| SQLite unsupported operation | FluentMigrator throws `DatabaseOperationNotSupportedException` |
 
 ---
 
