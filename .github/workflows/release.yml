@@ -23,19 +23,19 @@ jobs:
 
       - name: Rename binaries with platform suffixes
         run: |
-          cp publish/win-x64/pondhawk-persistence-mcp.exe publish/pondhawk-persistence-mcp-win-x64.exe
-          cp publish/osx-arm64/pondhawk-persistence-mcp publish/pondhawk-persistence-mcp-osx-arm64
-          cp publish/linux-x64/pondhawk-persistence-mcp publish/pondhawk-persistence-mcp-linux-x64
-          cp publish/linux-arm64/pondhawk-persistence-mcp publish/pondhawk-persistence-mcp-linux-arm64
+          cp publish/win-x64/pondhawk-persistence-mcp.exe publish/pondhawk-persistence-mcp-win.exe
+          cp publish/osx-arm64/pondhawk-persistence-mcp publish/pondhawk-persistence-mcp-osx
+          cp publish/linux-x64/pondhawk-persistence-mcp publish/pondhawk-persistence-mcp-linux
+          cp publish/linux-arm64/pondhawk-persistence-mcp publish/pondhawk-persistence-mcp-linux-arm
 
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: >
           gh release create "${{ github.ref_name }}"
-          publish/pondhawk-persistence-mcp-win-x64.exe
-          publish/pondhawk-persistence-mcp-osx-arm64
-          publish/pondhawk-persistence-mcp-linux-x64
-          publish/pondhawk-persistence-mcp-linux-arm64
+          publish/pondhawk-persistence-mcp-win.exe
+          publish/pondhawk-persistence-mcp-osx
+          publish/pondhawk-persistence-mcp-linux
+          publish/pondhawk-persistence-mcp-linux-arm
           --title "${{ github.ref_name }}"
           --generate-notes
