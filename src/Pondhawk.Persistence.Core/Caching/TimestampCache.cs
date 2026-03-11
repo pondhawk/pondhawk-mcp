@@ -37,8 +37,10 @@ public sealed class TimestampCache
             return _cachedConfig;
         }
 
-        // Config changed or first load — invalidate config and templates (not schema)
-        InvalidateConfigAndTemplates();
+        // Config changed or first load — invalidate config, templates, and schema
+        // (schema must be invalidated because RelationshipMerger.Merge mutates cached
+        // Model objects; stale merged FKs would persist if config Relationships change)
+        InvalidateAll();
 
         _configPath = configPath;
         _configTimestamp = currentTimestamp;
@@ -195,15 +197,4 @@ public sealed class TimestampCache
     /// </summary>
     public bool HasSchema(string schemaPath) => File.Exists(schemaPath);
 
-    /// <summary>
-    /// Invalidates config and template caches but preserves schema cache.
-    /// </summary>
-    private void InvalidateConfigAndTemplates()
-    {
-        _cachedConfig = null;
-        _configPath = null;
-        _configTimestamp = default;
-        _templateTimestamps.Clear();
-        _compiledTemplates.Clear();
-    }
 }

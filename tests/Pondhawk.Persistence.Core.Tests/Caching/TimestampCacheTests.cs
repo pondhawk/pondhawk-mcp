@@ -97,7 +97,7 @@ public class TimestampCacheTests : IDisposable
     }
 
     [Fact]
-    public void GetConfiguration_ConfigChange_InvalidatesConfigAndTemplates_NotSchema()
+    public void GetConfiguration_ConfigChange_InvalidatesAllCaches()
     {
         var configPath = WriteConfigFile();
         var templatePath = WriteTemplateFile("test.liquid", "{{ entity.Name }}");
@@ -106,8 +106,9 @@ public class TimestampCacheTests : IDisposable
         _cache.GetConfiguration(configPath);
         _cache.GetTemplate(templatePath);
 
-        // Write a schema file
+        // Write a schema file and capture the cached instance
         _cache.SetSchema([new Model { Name = "Products" }], SchemaPath, "TestDb", "sqlite");
+        var schemaBefore = _cache.GetSchema(SchemaPath);
 
         // Verify they are cached
         _cache.HasSchema(SchemaPath).ShouldBeTrue();
@@ -124,13 +125,17 @@ public class TimestampCacheTests : IDisposable
             }
             """);
 
-        // Reload config — should invalidate config+templates but NOT schema
+        // Reload config — should invalidate config, templates, AND schema
         _cache.GetConfiguration(configPath);
 
-        // Schema should still exist on disk
+        // Schema file should still exist on disk
         _cache.HasSchema(SchemaPath).ShouldBeTrue();
         // Template cache should be invalidated
         _cache.IsTemplateStale(templatePath).ShouldBeTrue();
+        // Schema cache should be invalidated — next GetSchema returns fresh objects
+        var schemaAfter = _cache.GetSchema(SchemaPath);
+        schemaAfter.ShouldNotBeNull();
+        ReferenceEquals(schemaBefore, schemaAfter).ShouldBeFalse();
     }
 
     [Fact]
