@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>fabrica-persistence-mcp — User Guide</title>
+<title>pondhawk-persistence-mcp — User Guide</title>
 <style>
   :root {
     --color-bg: #fdfdfd;
@@ -104,17 +104,18 @@
 <body>
 <div class="container">
 
-<h1>fabrica-persistence-mcp<small>Database introspection, code generation &amp; design-first DDL via MCP</small></h1>
+<h1>pondhawk-persistence-mcp<small>Database introspection, code generation, design-first DDL &amp; migrations via MCP</small></h1>
 
 <nav>
   <ul>
     <li><a href="#what-is-mcp">What is MCP?</a></li>
-    <li><a href="#what-is-fabrica">What is fabrica-persistence-mcp?</a></li>
+    <li><a href="#what-is-pondhawk">What is pondhawk-persistence-mcp?</a></li>
     <li><a href="#installation">Installation</a></li>
     <li><a href="#registering">Registering in Claude Code</a></li>
     <li><a href="#getting-started">Getting Started</a></li>
     <li><a href="#tools">Available Tools</a></li>
     <li><a href="#design-first">Design-First Pipeline</a></li>
+    <li><a href="#migrations">Migrations</a></li>
     <li><a href="#configuration">Configuration Reference</a></li>
     <li><a href="#env">Environment Variables</a></li>
     <li><a href="#tips">Tips</a></li>
@@ -137,25 +138,27 @@
   incorporates into its response.
 </p>
 
-<!-- ───────────────────── What is fabrica? ───────────────────── -->
-<h2 id="what-is-fabrica">What is fabrica-persistence-mcp?</h2>
+<!-- ───────────────────── What is pondhawk? ───────────────────── -->
+<h2 id="what-is-pondhawk">What is pondhawk-persistence-mcp?</h2>
 <p>
-  <strong>fabrica-persistence-mcp</strong> is an MCP server that gives Claude the
+  <strong>pondhawk-persistence-mcp</strong> is an MCP server that gives Claude the
   ability to introspect relational database schemas, generate code using
   <a href="https://shopify.github.io/liquid/">Liquid</a> templates, produce
-  dialect-specific DDL SQL, and create interactive ER diagrams. It supports
+  dialect-specific DDL SQL, generate versioned delta migration scripts, and create
+  interactive ER diagrams. It supports
   SQL Server, PostgreSQL, MySQL, MariaDB, and SQLite.
 </p>
 <p>It supports two complementary workflows:</p>
 <ul>
   <li><strong>Database-first</strong> — Introspect an existing database into <code>db-design.json</code>, then generate C# code via Liquid templates.</li>
-  <li><strong>Design-first</strong> — Author <code>db-design.json</code> by hand to design a new schema, then generate DDL SQL and ER diagrams.</li>
+  <li><strong>Design-first</strong> — Author <code>db-design.json</code> by hand to design a new schema, then generate DDL SQL, delta migrations, and ER diagrams.</li>
 </ul>
 <p>Typical things you can generate include:</p>
 <ul>
   <li>Entity / model classes</li>
   <li>Data-access repositories</li>
   <li>Dialect-specific DDL SQL (CREATE TABLE, indexes, foreign keys, enums)</li>
+  <li>Versioned delta migration scripts (ALTER TABLE, DROP/CREATE INDEX, etc.)</li>
   <li>Interactive HTML ER diagrams</li>
   <li>API DTOs or mapping code</li>
   <li>Any text artifact you can express as a Liquid template</li>
@@ -181,7 +184,7 @@
 
 <h3>Option A — CLI</h3>
 <p>Run the following command in your terminal:</p>
-<pre><code>claude mcp add fabrica fabrica-persistence-mcp -- --project C:/projects/my-app</code></pre>
+<pre><code>claude mcp add pondhawk pondhawk-persistence-mcp -- --project C:/projects/my-app</code></pre>
 <p>
   Replace <code>C:/projects/my-app</code> with the path to the directory that
   contains (or will contain) your <code>persistence.project.json</code>.
@@ -194,8 +197,8 @@
 </p>
 <pre><code>{
   "mcpServers": {
-    "fabrica": {
-      "command": "fabrica-persistence-mcp",
+    "pondhawk": {
+      "command": "pondhawk-persistence-mcp",
       "args": ["--project", "C:/projects/my-app"]
     }
   }
@@ -257,7 +260,7 @@
 </div>
 
 <div class="tip">
-  After upgrading fabrica-mcp, ask Claude to run <code>update</code> on existing
+  After upgrading pondhawk-mcp, ask Claude to run <code>update</code> on existing
   projects. This refreshes <code>AGENTS.md</code>,
   <code>persistence.project.schema.json</code>, and
   <code>db-design.schema.json</code> so Claude knows about new features
@@ -310,6 +313,14 @@
   </div>
 
   <div class="card">
+    <h4>generate_migration</h4>
+    <p>Generates a versioned delta migration SQL script by diffing <code>db-design.json</code> against the last snapshot. Each migration produces a paired <code>.sql</code> and <code>.json</code> file. Detects table/column adds, removes, modifications, index and FK changes, and emits warnings for destructive operations.</p>
+    <div class="params">
+      <span>description</span> <span>provider?</span> <span>output?</span> <span>dryRun?</span>
+    </div>
+  </div>
+
+  <div class="card">
     <h4>validate_config</h4>
     <p>Validates the project's <code>persistence.project.json</code> against its JSON Schema (catching unknown or misspelled property names) and checks referenced templates. Also validates <code>db-design.json</code> if it exists. No database connection needed.</p>
     <div class="params">No parameters</div>
@@ -323,7 +334,7 @@
 
   <div class="card">
     <h4>update</h4>
-    <p>Refreshes project files after upgrading fabrica-mcp. Overwrites <code>AGENTS.md</code> with the latest agent instructions, <code>persistence.project.schema.json</code> and <code>db-design.schema.json</code> with the latest JSON Schemas, then normalizes <code>persistence.project.json</code> via a load/save round-trip to pick up new defaults. All existing configuration values are preserved.</p>
+    <p>Refreshes project files after upgrading pondhawk-mcp. Overwrites <code>AGENTS.md</code> with the latest agent instructions, <code>persistence.project.schema.json</code> and <code>db-design.schema.json</code> with the latest JSON Schemas, then normalizes <code>persistence.project.json</code> via a load/save round-trip to pick up new defaults. All existing configuration values are preserved.</p>
     <div class="params">No parameters</div>
   </div>
 
@@ -332,7 +343,7 @@
 <!-- ───────────────────── Design-First Pipeline ───────────────────── -->
 <h2 id="design-first">Design-First Pipeline</h2>
 <p>
-  In addition to the database-first workflow, fabrica-mcp supports a
+  In addition to the database-first workflow, pondhawk-mcp supports a
   <strong>design-first</strong> pipeline where you author <code>db-design.json</code>
   by hand to design a new database schema, then generate DDL SQL and ER diagrams.
 </p>
@@ -460,6 +471,91 @@
   <code>persistence.project.json</code> if the config file exists.
 </div>
 
+<!-- ───────────────────── Migrations ───────────────────── -->
+<h2 id="migrations">Migrations</h2>
+<p>
+  The <code>generate_migration</code> tool produces versioned delta migration scripts
+  by comparing <code>db-design.json</code> against the last migration snapshot. This
+  works for both database-first and design-first workflows — edit
+  <code>db-design.json</code> (or re-introspect), then generate a migration to capture
+  the changes.
+</p>
+
+<h3>How It Works</h3>
+<ol class="steps">
+  <li>
+    <span class="step-number">1</span>
+    <div>
+      <strong>Edit the schema</strong> — Modify <code>db-design.json</code> to reflect
+      the desired state (add tables, rename columns, change types, etc.).
+    </div>
+  </li>
+  <li>
+    <span class="step-number">2</span>
+    <div>
+      <strong>Generate the migration</strong> — Ask Claude to run
+      <code>generate_migration</code> with a description (e.g. "add orders table").
+      The tool diffs the current <code>db-design.json</code> against the last snapshot
+      and produces provider-specific SQL.
+    </div>
+  </li>
+  <li>
+    <span class="step-number">3</span>
+    <div>
+      <strong>Review and deploy</strong> — Two files are written: a <code>.sql</code>
+      migration script and a <code>.json</code> snapshot. Review the SQL, then deploy
+      it using your preferred migration runner (DbUp, Flyway, a custom CLI, etc.).
+    </div>
+  </li>
+</ol>
+
+<h3>Detected Changes</h3>
+<table>
+  <thead>
+    <tr><th>Change Type</th><th>SQL Generated</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Table added</td><td><code>CREATE TABLE</code></td></tr>
+    <tr><td>Table removed</td><td><code>DROP TABLE</code></td></tr>
+    <tr><td>Column added</td><td><code>ALTER TABLE ADD COLUMN</code></td></tr>
+    <tr><td>Column removed</td><td><code>ALTER TABLE DROP COLUMN</code></td></tr>
+    <tr><td>Column modified</td><td><code>ALTER TABLE ALTER COLUMN</code></td></tr>
+    <tr><td>Index added / removed / modified</td><td><code>CREATE INDEX</code> / <code>DROP INDEX</code></td></tr>
+    <tr><td>Foreign key added / removed / modified</td><td><code>ALTER TABLE ADD/DROP CONSTRAINT</code></td></tr>
+    <tr><td>Primary key modified</td><td><code>DROP PK</code> + <code>ADD PK</code></td></tr>
+  </tbody>
+</table>
+
+<h3>Warnings</h3>
+<p>The tool emits warnings for potentially dangerous operations:</p>
+<ul>
+  <li><strong>Destructive</strong> — Table or column removed (potential data loss)</li>
+  <li><strong>PossibleRename</strong> — Column removed + similar column added in same table (may be a rename, not drop/add)</li>
+  <li><strong>DataLoss</strong> — Column type narrowed (e.g. <code>varchar(255)</code> to <code>varchar(50)</code>)</li>
+  <li><strong>NoChanges</strong> — Baseline and desired are identical; no migration needed</li>
+</ul>
+
+<h3>Migration Directory Structure</h3>
+<pre><code>migrations/
+  V001__initial_schema.sql        &lt;- full CREATE for bootstrap
+  V001__initial_schema.json       &lt;- snapshot of db-design.json at V001
+  V002__add_orders_table.sql      &lt;- delta ALTER statements
+  V002__add_orders_table.json     &lt;- snapshot at V002
+  V003__add_billing_columns.sql   &lt;- delta ALTER statements
+  V003__add_billing_columns.json  &lt;- snapshot at V003</code></pre>
+
+<h3>Statement Ordering</h3>
+<p>
+  Drops are emitted first (FKs, indexes, columns, PKs, tables), then creates
+  (tables, columns, modified columns, indexes, FKs). This ensures referential
+  integrity during migration execution.
+</p>
+
+<div class="tip">
+  Use the <code>dryRun</code> parameter to preview the diff and generated SQL without
+  writing any files. This is useful for reviewing changes before committing them.
+</div>
+
 <!-- ───────────────────── Configuration Reference ───────────────────── -->
 <h2 id="configuration">Configuration Reference</h2>
 <p>
@@ -475,6 +571,14 @@
     <tr><th>Section</th><th>Required</th><th>Purpose</th></tr>
   </thead>
   <tbody>
+    <tr>
+      <td><code>ProjectName</code></td><td>No</td>
+      <td>Project name used in output file names and diagram title bar.</td>
+    </tr>
+    <tr>
+      <td><code>Description</code></td><td>No</td>
+      <td>Optional project description shown in DDL header and diagram title bar.</td>
+    </tr>
     <tr>
       <td><code>Connection</code></td><td>Yes</td>
       <td>Database connection with a <code>Provider</code> and <code>ConnectionString</code>.</td>
@@ -587,7 +691,7 @@ DB_CONNECTION=Server=localhost;Database=MyDatabase;Trusted_Connection=true;</cod
   </li>
   <li>
     <strong>Run <code>update</code> after upgrading</strong> — When you install a
-    newer version of fabrica-mcp, ask Claude to run <code>update</code> on each
+    newer version of pondhawk-mcp, ask Claude to run <code>update</code> on each
     existing project. This overwrites <code>AGENTS.md</code> and
     JSON Schema files with the latest versions and
     normalizes your config file, all without losing any existing settings.
@@ -608,11 +712,22 @@ DB_CONNECTION=Server=localhost;Database=MyDatabase;Trusted_Connection=true;</cod
     SQL for each target database. Each run writes to a separate file
     (e.g. <code>db-design.postgresql.sql</code>, <code>db-design.sqlite.sql</code>).
   </li>
+  <li>
+    <strong>Use dry-run for migrations</strong> — Run <code>generate_migration</code>
+    with <code>dryRun: true</code> to preview the diff and SQL without writing files.
+    Review the changes before committing a migration.
+  </li>
+  <li>
+    <strong>Version migrations sequentially</strong> — Migration files are
+    auto-versioned (<code>V001</code>, <code>V002</code>, ...). Each
+    <code>.json</code> snapshot serves as the baseline for the next migration, so
+    keep the full history in version control.
+  </li>
 </ul>
 
 <hr style="margin-top: 3rem; border: none; border-top: 1px solid var(--color-border);">
 <p style="font-size: .85rem; color: var(--color-muted); margin-top: 1rem;">
-  fabrica-persistence-mcp — Generated documentation.
+  pondhawk-persistence-mcp — Generated documentation.
   For the complete template and configuration reference, see the <code>AGENTS.md</code> file
   created by the <code>init</code> tool.
 </p>
