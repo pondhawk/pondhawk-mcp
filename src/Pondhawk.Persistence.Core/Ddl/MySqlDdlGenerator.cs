@@ -17,7 +17,7 @@ public sealed class MySqlDdlGenerator : DdlGeneratorBase
         => $"CREATE VIEW `{view.Name}` AS\n{view.SelectSql};";
 
     internal override string GenerateDropView(Models.Model view)
-        => $"DROP VIEW `{view.Name}`;";
+        => $"DROP VIEW IF EXISTS `{view.Name}`;";
 
     protected override string MapEnumColumnType(SchemaFileEnum enumDef)
     {

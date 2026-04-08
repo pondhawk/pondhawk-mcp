@@ -148,7 +148,7 @@ public abstract class DdlGeneratorBase : IDdlGenerator
     /// </summary>
     internal virtual string GenerateDropView(Model view)
     {
-        return $"DROP VIEW \"{view.Name}\";";
+        return $"DROP VIEW IF EXISTS \"{view.Name}\";";
     }
 
     internal CreateTableExpression BuildCreateTableExpression(Model model)

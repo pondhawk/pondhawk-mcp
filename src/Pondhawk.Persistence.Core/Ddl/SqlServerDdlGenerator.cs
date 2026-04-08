@@ -25,7 +25,7 @@ public sealed class SqlServerDdlGenerator : DdlGeneratorBase
         => $"CREATE VIEW [{view.Schema}].[{view.Name}] AS\n{view.SelectSql};";
 
     internal override string GenerateDropView(Models.Model view)
-        => $"DROP VIEW [{view.Schema}].[{view.Name}];";
+        => $"DROP VIEW IF EXISTS [{view.Schema}].[{view.Name}];";
 
     protected override string GenerateEnumConstraints(Models.Model model)
     {
