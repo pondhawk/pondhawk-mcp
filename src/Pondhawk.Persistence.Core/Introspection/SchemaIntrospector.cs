@@ -81,7 +81,7 @@ public sealed class SchemaIntrospector
                     if (!MatchesFilter(view.Name, effectiveInclude, effectiveExclude))
                         continue;
 
-                    var model = MapViewToModel(view);
+                    var model = MapViewToModel(view, connection.Database);
                     models.Add(model);
                 }
             }
@@ -147,13 +147,14 @@ public sealed class SchemaIntrospector
         return model;
     }
 
-    private static Model MapViewToModel(DatabaseSchemaReader.DataSchema.DatabaseView view)
+    private static Model MapViewToModel(DatabaseSchemaReader.DataSchema.DatabaseView view, string? dbName = null)
     {
         var model = new Model
         {
             Name = view.Name,
             Schema = view.SchemaOwner ?? "",
-            IsView = true
+            IsView = true,
+            SelectSql = NormalizeViewSql(view.Sql, databaseName: dbName)
         };
 
         foreach (var col in view.Columns)
@@ -193,6 +194,7 @@ public sealed class SchemaIntrospector
             DefaultValue = col.DefaultValue
         };
     }
+
 
     public static bool MatchesFilter(string name, List<string>? include, List<string>? exclude)
     {
@@ -236,6 +238,47 @@ public sealed class SchemaIntrospector
         if (pattern.StartsWith('*'))
             return input.EndsWith(pattern[1..], StringComparison.OrdinalIgnoreCase);
         return string.Equals(input, pattern, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Normalizes a view's SQL definition by stripping the CREATE VIEW wrapper if present,
+    /// leaving just the SELECT statement. Also strips database-qualified references so that
+    /// the view SQL is portable across databases. Different providers return different formats.
+    /// </summary>
+    internal static string? NormalizeViewSql(string? sql, string? databaseName = null)
+    {
+        if (string.IsNullOrWhiteSpace(sql)) return null;
+
+        // Some providers return the full CREATE VIEW statement; strip it to just the SELECT
+        var trimmed = sql.Trim();
+        if (trimmed.StartsWith("CREATE", StringComparison.OrdinalIgnoreCase))
+        {
+            var idx = trimmed.IndexOf(" AS ", StringComparison.OrdinalIgnoreCase);
+            if (idx >= 0)
+                trimmed = trimmed[(idx + 4)..].Trim();
+        }
+
+        // Strip database-qualified references (e.g. `mydb`.`table` → `table`, [mydb].[dbo] → [dbo])
+        if (!string.IsNullOrEmpty(databaseName))
+            trimmed = StripDatabaseQualifier(trimmed, databaseName);
+
+        return trimmed;
+    }
+
+    /// <summary>
+    /// Removes database name qualifiers from SQL text. Only strips explicitly quoted forms
+    /// (backtick, bracket, double-quote) which are safe to match unambiguously.
+    /// </summary>
+    internal static string StripDatabaseQualifier(string sql, string databaseName)
+    {
+        // Backtick-quoted: `dbname`.
+        sql = sql.Replace($"`{databaseName}`.", "", StringComparison.OrdinalIgnoreCase);
+        // Bracket-quoted: [dbname].
+        sql = sql.Replace($"[{databaseName}].", "", StringComparison.OrdinalIgnoreCase);
+        // Double-quote-quoted: "dbname".
+        sql = sql.Replace($"\"{databaseName}\".", "", StringComparison.OrdinalIgnoreCase);
+
+        return sql;
     }
 
     /// <summary>

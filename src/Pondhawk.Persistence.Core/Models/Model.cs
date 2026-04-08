@@ -38,6 +38,7 @@ public sealed class Model
     public string Name { get; set; } = "";
     public string Schema { get; set; } = "";
     public bool IsView { get; set; }
+    public string? SelectSql { get; set; }
     public string? Note { get; set; }
     public List<Attribute> Attributes { get; set; } = [];
     public PrimaryKeyInfo? PrimaryKey { get; set; }

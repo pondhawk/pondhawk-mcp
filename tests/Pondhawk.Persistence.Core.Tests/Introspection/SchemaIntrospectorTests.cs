@@ -73,6 +73,157 @@ public class SchemaIntrospectorTests
     }
 
     [Fact]
+    public void Introspect_Views_CapturesSelectSql()
+    {
+        using var db = new SqliteTestDatabase()
+            .AddTable("Products", "Id INTEGER PRIMARY KEY, Name TEXT")
+            .AddView("ActiveProducts", "SELECT * FROM Products WHERE Name IS NOT NULL")
+            .Build();
+
+        var defaults = Defaults();
+        defaults.IncludeViews = true;
+
+        var models = SchemaIntrospector.Introspect(db.Connection, "sqlite", defaults);
+        var view = models.First(m => m.Name == "ActiveProducts");
+        view.SelectSql.ShouldNotBeNull();
+        view.SelectSql.ShouldContain("SELECT");
+        view.SelectSql.ShouldContain("Products");
+    }
+
+    [Fact]
+    public void NormalizeViewSql_StripsCreateViewPrefix()
+    {
+        var result = SchemaIntrospector.NormalizeViewSql("CREATE VIEW dbo.MyView AS SELECT * FROM Users");
+        result.ShouldBe("SELECT * FROM Users");
+    }
+
+    [Fact]
+    public void NormalizeViewSql_PreservesBareSelect()
+    {
+        var result = SchemaIntrospector.NormalizeViewSql("SELECT * FROM Users");
+        result.ShouldBe("SELECT * FROM Users");
+    }
+
+    [Fact]
+    public void NormalizeViewSql_NullReturnsNull()
+    {
+        SchemaIntrospector.NormalizeViewSql(null).ShouldBeNull();
+        SchemaIntrospector.NormalizeViewSql("  ").ShouldBeNull();
+    }
+
+    [Fact]
+    public void NormalizeViewSql_StripsMySqlDatabaseQualifier()
+    {
+        var sql = "SELECT `mydb`.`users`.`id`, `mydb`.`users`.`name` FROM `mydb`.`users`";
+        var result = SchemaIntrospector.NormalizeViewSql(sql, "mydb");
+        result.ShouldBe("SELECT `users`.`id`, `users`.`name` FROM `users`");
+    }
+
+    [Fact]
+    public void NormalizeViewSql_StripsSqlServerDatabaseQualifier()
+    {
+        var sql = "SELECT [MyDb].[dbo].[Users].[Id] FROM [MyDb].[dbo].[Users]";
+        var result = SchemaIntrospector.NormalizeViewSql(sql, "MyDb");
+        result.ShouldBe("SELECT [dbo].[Users].[Id] FROM [dbo].[Users]");
+    }
+
+    [Fact]
+    public void NormalizeViewSql_StripsPostgreSqlDatabaseQualifier()
+    {
+        var sql = "SELECT \"mydb\".\"public\".\"users\".\"id\" FROM \"mydb\".\"public\".\"users\"";
+        var result = SchemaIntrospector.NormalizeViewSql(sql, "mydb");
+        result.ShouldBe("SELECT \"public\".\"users\".\"id\" FROM \"public\".\"users\"");
+    }
+
+    [Fact]
+    public void NormalizeViewSql_StripsCreateViewAndDatabaseQualifier()
+    {
+        var sql = "CREATE VIEW `mydb`.`active_users` AS SELECT `mydb`.`users`.`id` FROM `mydb`.`users` WHERE `mydb`.`users`.`active` = 1";
+        var result = SchemaIntrospector.NormalizeViewSql(sql, "mydb");
+        result.ShouldBe("SELECT `users`.`id` FROM `users` WHERE `users`.`active` = 1");
+    }
+
+    [Fact]
+    public void NormalizeViewSql_NoDatabaseName_NoStripping()
+    {
+        var sql = "SELECT `mydb`.`users`.`id` FROM `mydb`.`users`";
+        var result = SchemaIntrospector.NormalizeViewSql(sql);
+        result.ShouldBe(sql);
+    }
+
+    [Fact]
+    public void StripDatabaseQualifier_CaseInsensitive()
+    {
+        var sql = "SELECT `MyDB`.`users`.`id` FROM `MYDB`.`users`";
+        var result = SchemaIntrospector.StripDatabaseQualifier(sql, "mydb");
+        result.ShouldBe("SELECT `users`.`id` FROM `users`");
+    }
+
+    [Fact]
+    public void ToModels_StripsDbQualifierFromViewSql()
+    {
+        var schemaFile = new SchemaFile
+        {
+            Database = "mydb",
+            Provider = "mysql",
+            Schemas =
+            [
+                new SchemaFileSchema
+                {
+                    Name = "mydb",
+                    Views =
+                    [
+                        new SchemaFileTable
+                        {
+                            Name = "ActiveUsers",
+                            Schema = "mydb",
+                            SelectSql = "SELECT `mydb`.`users`.`id` FROM `mydb`.`users` WHERE `mydb`.`users`.`active` = 1",
+                            Columns = [new SchemaFileColumn { Name = "id", DataType = "int" }]
+                        }
+                    ]
+                }
+            ]
+        };
+
+        var models = SchemaFileMapper.ToModels(schemaFile);
+
+        var view = models.First(m => m.IsView);
+        view.SelectSql.ShouldBe("SELECT `users`.`id` FROM `users` WHERE `users`.`active` = 1");
+    }
+
+    [Fact]
+    public void Introspect_DefaultValues_AllTypes()
+    {
+        using var db = new SqliteTestDatabase()
+            .AddTable("Products",
+                "Id INTEGER PRIMARY KEY, " +
+                "Status TEXT NOT NULL DEFAULT 'active', " +
+                "Count INTEGER NOT NULL DEFAULT 42, " +
+                "Rate REAL NOT NULL DEFAULT 3.14, " +
+                "Name TEXT DEFAULT 'hello'")
+            .Build();
+
+        var models = SchemaIntrospector.Introspect(db.Connection, "sqlite", Defaults());
+        var attrs = models[0].Attributes;
+
+        attrs.First(a => a.Name == "Status").DefaultValue.ShouldNotBeNull();
+        attrs.First(a => a.Name == "Count").DefaultValue.ShouldNotBeNull();
+        attrs.First(a => a.Name == "Rate").DefaultValue.ShouldNotBeNull();
+        attrs.First(a => a.Name == "Name").DefaultValue.ShouldNotBeNull();
+    }
+
+    [Fact]
+    public void Introspect_Tables_SelectSqlIsNull()
+    {
+        using var db = new SqliteTestDatabase()
+            .AddTable("Products", "Id INTEGER PRIMARY KEY, Name TEXT")
+            .Build();
+
+        var models = SchemaIntrospector.Introspect(db.Connection, "sqlite", Defaults());
+        models[0].SelectSql.ShouldBeNull();
+    }
+
+    [Fact]
     public void Introspect_Views_ExcludedByDefault()
     {
         using var db = new SqliteTestDatabase()

@@ -157,7 +157,7 @@
 <ul>
   <li>Entity / model classes</li>
   <li>Data-access repositories</li>
-  <li>Dialect-specific DDL SQL (CREATE TABLE, indexes, foreign keys, enums)</li>
+  <li>Dialect-specific DDL SQL (CREATE TABLE, CREATE VIEW, indexes, foreign keys, enums)</li>
   <li>Versioned delta migration scripts (ALTER TABLE, DROP/CREATE INDEX, etc.)</li>
   <li>Interactive HTML ER diagrams</li>
   <li>API DTOs or mapping code</li>
@@ -282,7 +282,7 @@
 
   <div class="card">
     <h4>introspect_schema</h4>
-    <p>Introspects the project's database connection, writes the introspected schema to <code>db-design.json</code> with <code>"Origin": "introspected"</code>, and returns a lightweight summary. Refuses to overwrite if the existing file has <code>"Origin": "design"</code>.</p>
+    <p>Introspects the project's database connection, writes the introspected schema to <code>db-design.json</code> with <code>"Origin": "introspected"</code>, and returns a lightweight summary. View SQL definitions are captured when <code>includeViews</code> is enabled. Refuses to overwrite if the existing file has <code>"Origin": "design"</code>.</p>
     <div class="params">
       <span>schemas?</span> <span>include?</span> <span>exclude?</span> <span>includeViews?</span>
     </div>
@@ -298,7 +298,7 @@
 
   <div class="card">
     <h4>generate_ddl</h4>
-    <p>Generates dialect-specific DDL SQL from <code>db-design.json</code> and writes it to a file. Supports SQL Server, PostgreSQL, MySQL, and SQLite. Handles enums, indexes, foreign keys, and auto-generated constraint names.</p>
+    <p>Generates dialect-specific DDL SQL from <code>db-design.json</code> and writes it to a file. Supports SQL Server, PostgreSQL, MySQL, and SQLite. Handles enums, indexes, foreign keys, views (<code>CREATE VIEW</code> from <code>SelectSql</code>), and auto-generated constraint names.</p>
     <div class="params">
       <span>provider</span> <span>output?</span>
     </div>
@@ -314,7 +314,7 @@
 
   <div class="card">
     <h4>generate_migration</h4>
-    <p>Generates a versioned delta migration SQL script by diffing <code>db-design.json</code> against the last snapshot. Each migration produces a paired <code>.sql</code> and <code>.json</code> file. Detects table/column adds, removes, modifications, index and FK changes, and emits warnings for destructive operations.</p>
+    <p>Generates a versioned delta migration SQL script by diffing <code>db-design.json</code> against the last snapshot. Each migration produces a paired <code>.sql</code> and <code>.json</code> file. Detects table/column/view adds, removes, and modifications, index and FK changes, and emits warnings for destructive operations.</p>
     <div class="params">
       <span>description</span> <span>provider?</span> <span>output?</span> <span>dryRun?</span>
     </div>
@@ -425,6 +425,18 @@
             { "Columns": ["Email"], "IsUnique": true }
           ]
         }
+      ],
+      "Views": [
+        {
+          "Name": "ActiveUsers",
+          "Note": "Users with verified emails",
+          "SelectSql": "SELECT Id, Email, Role FROM Users WHERE Email IS NOT NULL",
+          "Columns": [
+            { "Name": "Id", "DataType": "int" },
+            { "Name": "Email", "DataType": "varchar(255)" },
+            { "Name": "Role", "DataType": "UserRole" }
+          ]
+        }
       ]
     }
   ],
@@ -451,6 +463,7 @@
     <tr><td>Auto-increment</td><td><code>IDENTITY(1,1)</code></td><td><code>GENERATED ALWAYS AS IDENTITY</code></td><td><code>AUTO_INCREMENT</code></td><td><code>AUTOINCREMENT</code></td></tr>
     <tr><td>Enum handling</td><td>CHECK constraint</td><td><code>CREATE TYPE AS ENUM</code></td><td>Inline <code>ENUM(...)</code></td><td>CHECK constraint</td></tr>
     <tr><td>Boolean type</td><td><code>bit</code></td><td><code>boolean</code></td><td><code>tinyint(1)</code></td><td><code>INTEGER</code></td></tr>
+    <tr><td>View syntax</td><td><code>CREATE VIEW [s].[v] AS</code></td><td><code>CREATE VIEW "s"."v" AS</code></td><td><code>CREATE VIEW `s`.`v` AS</code></td><td><code>CREATE VIEW "v" AS</code></td></tr>
   </tbody>
 </table>
 
@@ -523,6 +536,9 @@
     <tr><td>Index added / removed / modified</td><td><code>CREATE INDEX</code> / <code>DROP INDEX</code></td></tr>
     <tr><td>Foreign key added / removed / modified</td><td><code>ALTER TABLE ADD/DROP CONSTRAINT</code></td></tr>
     <tr><td>Primary key modified</td><td><code>DROP PK</code> + <code>ADD PK</code></td></tr>
+    <tr><td>View added</td><td><code>CREATE VIEW</code></td></tr>
+    <tr><td>View removed</td><td><code>DROP VIEW</code></td></tr>
+    <tr><td>View modified</td><td><code>DROP VIEW</code> + <code>CREATE VIEW</code></td></tr>
   </tbody>
 </table>
 
@@ -547,8 +563,10 @@
 <h3>Statement Ordering</h3>
 <p>
   Drops are emitted first (FKs, indexes, columns, PKs, tables), then creates
-  (tables, columns, modified columns, indexes, FKs). This ensures referential
-  integrity during migration execution.
+  (tables, columns, modified columns, indexes, FKs), and finally view changes
+  (drop, create, modify). Views are processed after all table changes since
+  views may reference tables. This ensures referential integrity during
+  migration execution.
 </p>
 
 <div class="tip">

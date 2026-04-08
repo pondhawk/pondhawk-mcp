@@ -5,6 +5,7 @@ using FluentMigrator.Model;
 using System.Data;
 using FluentMigrator.Runner.Generators;
 using Pondhawk.Persistence.Core.Introspection;
+using Pondhawk.Persistence.Core.Migrations;
 using Pondhawk.Persistence.Core.Models;
 using Attribute = Pondhawk.Persistence.Core.Models.Attribute;
 using Models_Attribute = Pondhawk.Persistence.Core.Models.Attribute;
@@ -94,9 +95,7 @@ public abstract class DdlGeneratorBase : IDdlGenerator
             var wrote = false;
             foreach (var idx in model.Indexes)
             {
-                if (pkCols is { Count: > 0 }
-                    && idx.Columns.Count == pkCols.Count
-                    && new HashSet<string>(idx.Columns, StringComparer.OrdinalIgnoreCase).SetEquals(pkCols))
+                if (MigrationSqlGenerator.IsPrimaryKeyIndex(idx, pkCols))
                     continue;
 
                 var expr = BuildCreateIndexExpression(model, idx);
@@ -123,7 +122,33 @@ public abstract class DdlGeneratorBase : IDdlGenerator
         foreach (var model in sorted)
             sb.Append(GenerateEnumConstraints(model));
 
+        // 8. CREATE VIEW statements (views with SelectSql defined)
+        var views = models.Where(m => m.IsView && !string.IsNullOrWhiteSpace(m.SelectSql)).ToList();
+        foreach (var view in views)
+        {
+            if (!string.IsNullOrEmpty(view.Note))
+                sb.AppendLine($"-- {view.Note}");
+            sb.AppendLine(GenerateCreateView(view));
+            sb.AppendLine();
+        }
+
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Generates a CREATE VIEW statement. Override in dialect-specific generators for correct quoting.
+    /// </summary>
+    internal virtual string GenerateCreateView(Model view)
+    {
+        return $"CREATE VIEW \"{view.Name}\" AS\n{view.SelectSql};";
+    }
+
+    /// <summary>
+    /// Generates a DROP VIEW statement. Override in dialect-specific generators for correct quoting.
+    /// </summary>
+    internal virtual string GenerateDropView(Model view)
+    {
+        return $"DROP VIEW \"{view.Name}\";";
     }
 
     internal CreateTableExpression BuildCreateTableExpression(Model model)
@@ -155,7 +180,7 @@ public abstract class DdlGeneratorBase : IDdlGenerator
                 PrimaryKeyName = (model.PrimaryKey?.Columns.Contains(attr.Name) ?? false) ? pkName : null
             };
 
-            if (!string.IsNullOrEmpty(attr.DefaultValue) && !attr.IsIdentity)
+            if (attr.DefaultValue is not null && !attr.IsIdentity)
                 col.DefaultValue = RawSql.Insert(ProcessDefaultValue(attr));
 
             expr.Columns.Add(col);

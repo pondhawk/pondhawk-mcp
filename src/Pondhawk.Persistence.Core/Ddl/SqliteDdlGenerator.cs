@@ -11,6 +11,12 @@ public sealed class SqliteDdlGenerator : DdlGeneratorBase
 
     protected override IMigrationGenerator GetMigrationGenerator() => new SQLiteGenerator();
 
+    internal override string GenerateCreateView(Models.Model view)
+        => $"CREATE VIEW \"{view.Name}\" AS\n{view.SelectSql};";
+
+    internal override string GenerateDropView(Models.Model view)
+        => $"DROP VIEW \"{view.Name}\";";
+
     protected override string MapEnumColumnType(SchemaFileEnum enumDef) => "TEXT";
 
     protected override string GenerateEnumDdl(SchemaFileEnum enumDef)

@@ -78,6 +78,10 @@ public static class DbDesignFileSchema
                   "type": "string",
                   "description": "Descriptive note, emitted as SQL comment in DDL."
                 },
+                "SelectSql": {
+                  "type": "string",
+                  "description": "The SELECT SQL that defines this view. Only applicable to entries in the Views array."
+                },
                 "Columns": {
                   "type": "array",
                   "items": { "$ref": "#/$defs/ColumnDef" }

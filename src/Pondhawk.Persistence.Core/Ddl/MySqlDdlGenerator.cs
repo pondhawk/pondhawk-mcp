@@ -13,6 +13,12 @@ public sealed class MySqlDdlGenerator : DdlGeneratorBase
 
     protected override IMigrationGenerator GetMigrationGenerator() => new MySql8Generator();
 
+    internal override string GenerateCreateView(Models.Model view)
+        => $"CREATE VIEW `{view.Name}` AS\n{view.SelectSql};";
+
+    internal override string GenerateDropView(Models.Model view)
+        => $"DROP VIEW `{view.Name}`;";
+
     protected override string MapEnumColumnType(SchemaFileEnum enumDef)
     {
         var values = string.Join(", ", enumDef.Values.Select(v => $"'{v.Name}'"));
@@ -24,22 +30,32 @@ public sealed class MySqlDdlGenerator : DdlGeneratorBase
         "datetime", "datetime2", "date", "time", "timestamp"
     };
 
-    private static bool IsDateTimeType(string dataType)
+    private static readonly HashSet<string> StringBaseTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "varchar", "char", "text", "tinytext", "mediumtext", "longtext", "enum", "set"
+    };
+
+    private static string GetBaseType(string dataType)
     {
         var parenIdx = dataType.IndexOf('(');
-        var baseType = parenIdx > 0 ? dataType[..parenIdx] : dataType;
-        return DateTimeBaseTypes.Contains(baseType);
+        return parenIdx > 0 ? dataType[..parenIdx] : dataType;
     }
+
+    private static bool IsDateTimeType(string dataType) => DateTimeBaseTypes.Contains(GetBaseType(dataType));
+
+    private static bool IsStringType(string dataType) => StringBaseTypes.Contains(GetBaseType(dataType));
 
     protected override string ProcessDefaultValue(Attribute attr)
     {
         var val = attr.DefaultValue!;
 
-        // Only wrap datetime defaults that are literal values (not functions or keywords)
-        if (IsDateTimeType(attr.DataType)
+        // MySQL INFORMATION_SCHEMA returns string/datetime defaults without quotes.
+        // Wrap literal values that aren't already quoted and aren't function calls.
+        if ((IsDateTimeType(attr.DataType) || IsStringType(attr.DataType))
             && !val.Contains('(')
             && !val.StartsWith('\'')
-            && !string.Equals(val, "CURRENT_TIMESTAMP", StringComparison.OrdinalIgnoreCase))
+            && !string.Equals(val, "CURRENT_TIMESTAMP", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(val, "NULL", StringComparison.OrdinalIgnoreCase))
         {
             return $"'{val}'";
         }

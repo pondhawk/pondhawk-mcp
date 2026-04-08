@@ -28,6 +28,7 @@ public sealed class SchemaFileTable
     public string Name { get; set; } = "";
     public string Schema { get; set; } = "";
     public string? Note { get; set; }
+    public string? SelectSql { get; set; }
     public List<SchemaFileColumn> Columns { get; set; } = [];
     public SchemaFilePrimaryKey? PrimaryKey { get; set; }
     public List<SchemaFileForeignKey> ForeignKeys { get; set; } = [];
@@ -130,13 +131,14 @@ public static class SchemaFileMapper
 
     public static List<Model> ToModels(SchemaFile schemaFile)
     {
+        var dbName = schemaFile.Database;
         var models = new List<Model>();
         foreach (var schema in schemaFile.Schemas)
         {
             foreach (var table in schema.Tables)
                 models.Add(MapTableToModel(table, isView: false));
             foreach (var view in schema.Views)
-                models.Add(MapTableToModel(view, isView: true));
+                models.Add(MapTableToModel(view, isView: true, databaseName: dbName));
         }
         return models;
     }
@@ -157,6 +159,7 @@ public static class SchemaFileMapper
         Name = m.Name,
         Schema = m.Schema,
         Note = m.Note,
+        SelectSql = m.SelectSql,
         Columns = m.Attributes.Select(a => new SchemaFileColumn
         {
             Name = a.Name,
@@ -202,12 +205,15 @@ public static class SchemaFileMapper
         }).ToList()
     };
 
-    private static Model MapTableToModel(SchemaFileTable t, bool isView) => new()
+    private static Model MapTableToModel(SchemaFileTable t, bool isView, string? databaseName = null) => new()
     {
         Name = t.Name,
         Schema = t.Schema,
         IsView = isView,
         Note = t.Note,
+        SelectSql = isView && !string.IsNullOrEmpty(databaseName) && !string.IsNullOrEmpty(t.SelectSql)
+            ? SchemaIntrospector.StripDatabaseQualifier(t.SelectSql, databaseName)
+            : t.SelectSql,
         Attributes = t.Columns.Select(c => new Attribute
         {
             Name = c.Name,

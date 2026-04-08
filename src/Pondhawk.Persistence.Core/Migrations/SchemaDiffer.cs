@@ -96,10 +96,58 @@ public static class SchemaDiffer
         changes.AddRange(modifiedFks);
         changes.AddRange(addedFks);
 
+        // View diffs (views come after all table changes)
+        var baselineViews = baseline.Where(m => m.IsView).ToList();
+        var desiredViews = desired.Where(m => m.IsView).ToList();
+        DiffViews(baselineViews, desiredViews, changes, warnings);
+
         if (changes.Count == 0)
             warnings.Add(new MigrationWarning(WarningType.NoChanges, "No schema changes detected"));
 
         return (changes, warnings);
+    }
+
+    private static void DiffViews(List<Model> baseline, List<Model> desired,
+        List<SchemaChange> changes, List<MigrationWarning> warnings)
+    {
+        var baseMap = new Dictionary<string, Model>(StringComparer.OrdinalIgnoreCase);
+        foreach (var m in baseline)
+            baseMap[$"{m.Schema}.{m.Name}"] = m;
+
+        var desiredMap = new Dictionary<string, Model>(StringComparer.OrdinalIgnoreCase);
+        foreach (var m in desired)
+            desiredMap[$"{m.Schema}.{m.Name}"] = m;
+
+        // Removed views (drop before create)
+        foreach (var (key, baseView) in baseMap)
+        {
+            if (!desiredMap.ContainsKey(key))
+            {
+                changes.Add(new ViewRemoved(baseView.Name, baseView.Schema, baseView));
+                warnings.Add(new MigrationWarning(WarningType.Destructive,
+                    $"View {baseView.Schema}.{baseView.Name} will be dropped"));
+            }
+        }
+
+        // Added views
+        foreach (var (key, desiredView) in desiredMap)
+        {
+            if (!baseMap.ContainsKey(key))
+                changes.Add(new ViewAdded(desiredView.Name, desiredView.Schema, desiredView));
+        }
+
+        // Modified views (compare SelectSql)
+        foreach (var (key, desiredView) in desiredMap)
+        {
+            if (!baseMap.TryGetValue(key, out var baseView))
+                continue;
+
+            if (!string.Equals(baseView.SelectSql?.Trim(), desiredView.SelectSql?.Trim(),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                changes.Add(new ViewModified(desiredView.Name, desiredView.Schema, baseView, desiredView));
+            }
+        }
     }
 
     private static void DiffColumns(Model baseline, Model desired,
@@ -196,13 +244,24 @@ public static class SchemaDiffer
     private static void DiffIndexes(Model baseline, Model desired,
         List<SchemaChange> dropped, List<SchemaChange> added, List<SchemaChange> modified)
     {
+        var basePkCols = baseline.PrimaryKey?.Columns;
+        var desiredPkCols = desired.PrimaryKey?.Columns;
+
         var baseMap = new Dictionary<string, IndexInfo>(StringComparer.OrdinalIgnoreCase);
         foreach (var idx in baseline.Indexes)
+        {
+            if (MigrationSqlGenerator.IsPrimaryKeyIndex(idx, basePkCols))
+                continue;
             baseMap[idx.Name] = idx;
+        }
 
         var desiredMap = new Dictionary<string, IndexInfo>(StringComparer.OrdinalIgnoreCase);
         foreach (var idx in desired.Indexes)
+        {
+            if (MigrationSqlGenerator.IsPrimaryKeyIndex(idx, desiredPkCols))
+                continue;
             desiredMap[idx.Name] = idx;
+        }
 
         // Removed indexes
         foreach (var (name, idx) in baseMap)

@@ -336,4 +336,61 @@ public class SqlServerDdlGeneratorTests
         var prodIdx = ddl.IndexOf("CREATE TABLE [dbo].[Products]");
         catIdx.ShouldBeLessThan(prodIdx);
     }
+
+    [Fact]
+    public void GeneratesCreateView()
+    {
+        var table = CreateTable("Users");
+        var view = new Model
+        {
+            Name = "ActiveUsers", Schema = "dbo", IsView = true,
+            SelectSql = "SELECT Id, Name FROM Users WHERE Name IS NOT NULL",
+            Attributes = [new Attribute { Name = "Id", DataType = "int" }, new Attribute { Name = "Name", DataType = "varchar(100)" }]
+        };
+        var ddl = _generator.Generate([table, view]);
+        ddl.ShouldContain("CREATE VIEW [dbo].[ActiveUsers] AS");
+        ddl.ShouldContain("SELECT Id, Name FROM Users WHERE Name IS NOT NULL");
+    }
+
+    [Fact]
+    public void ViewWithoutSelectSql_Skipped()
+    {
+        var view = new Model
+        {
+            Name = "EmptyView", Schema = "dbo", IsView = true,
+            Attributes = [new Attribute { Name = "Id", DataType = "int" }]
+        };
+        var ddl = _generator.Generate([view]);
+        ddl.ShouldNotContain("CREATE VIEW");
+    }
+
+    [Fact]
+    public void ViewsAppearAfterTables()
+    {
+        var table = CreateTable("Users");
+        var view = new Model
+        {
+            Name = "ActiveUsers", Schema = "dbo", IsView = true,
+            SelectSql = "SELECT * FROM Users",
+            Attributes = [new Attribute { Name = "Id", DataType = "int" }]
+        };
+        var ddl = _generator.Generate([table, view]);
+        var tableIdx = ddl.IndexOf("CREATE TABLE");
+        var viewIdx = ddl.IndexOf("CREATE VIEW");
+        tableIdx.ShouldBeLessThan(viewIdx);
+    }
+
+    [Fact]
+    public void ViewNote_EmittedAsComment()
+    {
+        var view = new Model
+        {
+            Name = "ActiveUsers", Schema = "dbo", IsView = true,
+            SelectSql = "SELECT * FROM Users",
+            Note = "Active users only",
+            Attributes = [new Attribute { Name = "Id", DataType = "int" }]
+        };
+        var ddl = _generator.Generate([view]);
+        ddl.ShouldContain("-- Active users only");
+    }
 }

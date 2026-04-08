@@ -137,4 +137,18 @@ public class PostgreSqlDdlGeneratorTests
         ddl.ShouldContain("uuid");
         ddl.ShouldContain("jsonb");
     }
+
+    [Fact]
+    public void GeneratesCreateView()
+    {
+        var view = new Model
+        {
+            Name = "ActiveUsers", Schema = "public", IsView = true,
+            SelectSql = "SELECT id, name FROM users",
+            Attributes = [new Attribute { Name = "id", DataType = "int" }]
+        };
+        var ddl = _generator.Generate([view]);
+        ddl.ShouldContain("CREATE VIEW \"public\".\"ActiveUsers\" AS");
+        ddl.ShouldContain("SELECT id, name FROM users");
+    }
 }

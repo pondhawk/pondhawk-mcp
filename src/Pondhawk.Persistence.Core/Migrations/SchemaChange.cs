@@ -16,7 +16,10 @@ public enum ChangeType
     ForeignKeyAdded,
     ForeignKeyRemoved,
     ForeignKeyModified,
-    PrimaryKeyModified
+    PrimaryKeyModified,
+    ViewAdded,
+    ViewRemoved,
+    ViewModified
 }
 
 public abstract record SchemaChange(ChangeType Type, string TableName, string SchemaName)
@@ -94,4 +97,22 @@ public sealed record PrimaryKeyModified(string TableName, string SchemaName, Pri
     : SchemaChange(ChangeType.PrimaryKeyModified, TableName, SchemaName)
 {
     public override string Describe() => $"Alter primary key on {SchemaName}.{TableName}";
+}
+
+public sealed record ViewAdded(string TableName, string SchemaName, Model Model)
+    : SchemaChange(ChangeType.ViewAdded, TableName, SchemaName)
+{
+    public override string Describe() => $"Create view {SchemaName}.{TableName}";
+}
+
+public sealed record ViewRemoved(string TableName, string SchemaName, Model Model)
+    : SchemaChange(ChangeType.ViewRemoved, TableName, SchemaName)
+{
+    public override string Describe() => $"Drop view {SchemaName}.{TableName}";
+}
+
+public sealed record ViewModified(string TableName, string SchemaName, Model OldModel, Model NewModel)
+    : SchemaChange(ChangeType.ViewModified, TableName, SchemaName)
+{
+    public override string Describe() => $"Alter view {SchemaName}.{TableName}";
 }

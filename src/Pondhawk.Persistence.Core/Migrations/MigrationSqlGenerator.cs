@@ -45,6 +45,9 @@ public static class MigrationSqlGenerator
             ForeignKeyRemoved fkr => [GenerateForeignKeyRemoved(migrationGen, fkr)],
             ForeignKeyModified fkm => GenerateForeignKeyModified(generator, migrationGen, fkm),
             PrimaryKeyModified pkm => GeneratePrimaryKeyModified(migrationGen, pkm),
+            ViewAdded va => [generator.GenerateCreateView(va.Model)],
+            ViewRemoved vr => [generator.GenerateDropView(vr.Model)],
+            ViewModified vm => [generator.GenerateDropView(vm.OldModel), generator.GenerateCreateView(vm.NewModel)],
             _ => []
         };
     }
@@ -57,9 +60,13 @@ public static class MigrationSqlGenerator
         var createExpr = generator.BuildCreateTableExpression(ta.Model);
         results.Add(migrationGen.Generate(createExpr));
 
-        // CREATE INDEX for each index
+        // CREATE INDEX for each index (skip indexes that duplicate the primary key)
+        var pkCols = ta.Model.PrimaryKey?.Columns;
         foreach (var idx in ta.Model.Indexes)
         {
+            if (IsPrimaryKeyIndex(idx, pkCols))
+                continue;
+
             var indexExpr = generator.BuildCreateIndexExpression(ta.Model, idx);
             results.Add(migrationGen.Generate(indexExpr));
         }
@@ -242,6 +249,13 @@ public static class MigrationSqlGenerator
         return results;
     }
 
+    internal static bool IsPrimaryKeyIndex(IndexInfo idx, List<string>? pkCols)
+    {
+        return pkCols is { Count: > 0 }
+               && idx.Columns.Count == pkCols.Count
+               && new HashSet<string>(idx.Columns, StringComparer.OrdinalIgnoreCase).SetEquals(pkCols);
+    }
+
     private static ColumnDefinition BuildColumnDefinition(DdlGeneratorBase generator, Attribute attr)
     {
         var col = new ColumnDefinition
@@ -252,7 +266,7 @@ public static class MigrationSqlGenerator
             IsIdentity = attr.IsIdentity
         };
 
-        if (!string.IsNullOrEmpty(attr.DefaultValue) && !attr.IsIdentity)
+        if (attr.DefaultValue is not null && !attr.IsIdentity)
             col.DefaultValue = RawSql.Insert(generator.ProcessDefaultValueInternal(attr));
 
         return col;

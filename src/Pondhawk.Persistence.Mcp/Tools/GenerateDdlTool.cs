@@ -84,12 +84,13 @@ public sealed class GenerateDdlTool
 
         // 7. Return summary
         var tableCount = models.Count(m => !m.IsView);
+        var viewCount = models.Count(m => m.IsView && !string.IsNullOrWhiteSpace(m.SelectSql));
         var indexCount = models.Sum(m => m.Indexes.Count);
         var fkCount = models.Sum(m => m.ForeignKeys.Count);
 
         sw.Stop();
-        logger.LogInformation("Tool generate_ddl completed in {Duration}ms — {Tables} tables, {Provider} dialect",
-            sw.ElapsedMilliseconds, tableCount, provider);
+        logger.LogInformation("Tool generate_ddl completed in {Duration}ms — {Tables} tables, {Views} views, {Provider} dialect",
+            sw.ElapsedMilliseconds, tableCount, viewCount, provider);
 
         return JsonSerializer.Serialize(new
         {
@@ -99,6 +100,7 @@ public sealed class GenerateDdlTool
             {
                 EnumTypes = schemaFile.Enums.Count,
                 Tables = tableCount,
+                Views = viewCount,
                 Indexes = indexCount,
                 ForeignKeys = fkCount
             }

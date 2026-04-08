@@ -217,6 +217,33 @@ public class SchemaDifferTests
     }
 
     [Fact]
+    public void PrimaryKeyIndex_IgnoredInDiff()
+    {
+        var baseline = new List<Model> { CreateTable("Users") };
+        var desired = new List<Model> { CreateTable("Users") };
+        // Both sides have a PRIMARY index that duplicates the PK — should not appear as a change
+        baseline[0].Indexes.Add(new IndexInfo { Name = "PRIMARY", Columns = ["Id"], IsUnique = true });
+        desired[0].Indexes.Add(new IndexInfo { Name = "PRIMARY", Columns = ["Id"], IsUnique = true });
+
+        var (changes, _) = SchemaDiffer.Diff(baseline, desired);
+
+        changes.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void PrimaryKeyIndex_NotEmittedAsAdded()
+    {
+        var baseline = new List<Model>();
+        var desired = new List<Model> { CreateTable("Users") };
+        desired[0].Indexes.Add(new IndexInfo { Name = "PRIMARY", Columns = ["Id"], IsUnique = true });
+
+        var (changes, _) = SchemaDiffer.Diff(baseline, desired);
+
+        changes.OfType<TableAdded>().ShouldNotBeEmpty();
+        changes.OfType<IndexAdded>().ShouldBeEmpty();
+    }
+
+    [Fact]
     public void IndexRemoved()
     {
         var baseline = new List<Model> { CreateTable("Users") };
@@ -392,7 +419,7 @@ public class SchemaDifferTests
     }
 
     [Fact]
-    public void ViewsExcluded()
+    public void Views_NotTreatedAsTables()
     {
         var baseline = new List<Model>();
         var desired = new List<Model>
@@ -401,14 +428,96 @@ public class SchemaDifferTests
             new()
             {
                 Name = "ActiveUsers", Schema = "dbo", IsView = true,
+                SelectSql = "SELECT * FROM Users",
                 Attributes = [new Attribute { Name = "Id", DataType = "int" }]
             }
         };
 
         var (changes, _) = SchemaDiffer.Diff(baseline, desired);
 
-        changes.ShouldNotContain(c => c.TableName == "ActiveUsers");
+        changes.OfType<TableAdded>().ShouldNotContain(c => c.TableName == "ActiveUsers");
         changes.OfType<TableAdded>().ShouldContain(c => c.TableName == "Users");
+        changes.OfType<ViewAdded>().ShouldContain(c => c.TableName == "ActiveUsers");
+    }
+
+    [Fact]
+    public void ViewAdded()
+    {
+        var baseline = new List<Model> { CreateTable("Users") };
+        var desired = new List<Model>
+        {
+            CreateTable("Users"),
+            new()
+            {
+                Name = "ActiveUsers", Schema = "dbo", IsView = true,
+                SelectSql = "SELECT * FROM Users WHERE Active = 1",
+                Attributes = [new Attribute { Name = "Id", DataType = "int" }]
+            }
+        };
+
+        var (changes, _) = SchemaDiffer.Diff(baseline, desired);
+        changes.OfType<ViewAdded>().ShouldContain(c => c.TableName == "ActiveUsers");
+    }
+
+    [Fact]
+    public void ViewRemoved()
+    {
+        var baseline = new List<Model>
+        {
+            CreateTable("Users"),
+            new()
+            {
+                Name = "ActiveUsers", Schema = "dbo", IsView = true,
+                SelectSql = "SELECT * FROM Users",
+                Attributes = [new Attribute { Name = "Id", DataType = "int" }]
+            }
+        };
+        var desired = new List<Model> { CreateTable("Users") };
+
+        var (changes, warnings) = SchemaDiffer.Diff(baseline, desired);
+        changes.OfType<ViewRemoved>().ShouldContain(c => c.TableName == "ActiveUsers");
+        warnings.ShouldContain(w => w.Type == WarningType.Destructive && w.Message.Contains("ActiveUsers"));
+    }
+
+    [Fact]
+    public void ViewModified_SelectSqlChanged()
+    {
+        var baseView = new Model
+        {
+            Name = "ActiveUsers", Schema = "dbo", IsView = true,
+            SelectSql = "SELECT * FROM Users WHERE Active = 1",
+            Attributes = [new Attribute { Name = "Id", DataType = "int" }]
+        };
+        var desiredView = new Model
+        {
+            Name = "ActiveUsers", Schema = "dbo", IsView = true,
+            SelectSql = "SELECT * FROM Users WHERE Active = 1 AND Verified = 1",
+            Attributes = [new Attribute { Name = "Id", DataType = "int" }]
+        };
+
+        var (changes, _) = SchemaDiffer.Diff([baseView], [desiredView]);
+        changes.OfType<ViewModified>().ShouldContain(c => c.TableName == "ActiveUsers");
+    }
+
+    [Fact]
+    public void ViewUnchanged_NoChanges()
+    {
+        var baseView = new Model
+        {
+            Name = "ActiveUsers", Schema = "dbo", IsView = true,
+            SelectSql = "SELECT * FROM Users",
+            Attributes = [new Attribute { Name = "Id", DataType = "int" }]
+        };
+        var desiredView = new Model
+        {
+            Name = "ActiveUsers", Schema = "dbo", IsView = true,
+            SelectSql = "SELECT * FROM Users",
+            Attributes = [new Attribute { Name = "Id", DataType = "int" }]
+        };
+
+        var (changes, warnings) = SchemaDiffer.Diff([baseView], [desiredView]);
+        changes.ShouldBeEmpty();
+        warnings.ShouldContain(w => w.Type == WarningType.NoChanges);
     }
 
     [Fact]

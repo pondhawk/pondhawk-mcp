@@ -287,4 +287,89 @@ public class MigrationSqlGeneratorTests
         results.ShouldNotBeEmpty();
         results[0].Sql.ShouldContain("1");
     }
+
+    [Theory]
+    [InlineData("sqlserver")]
+    [InlineData("postgresql")]
+    [InlineData("mysql")]
+    [InlineData("sqlite")]
+    public void TableAdded_SkipsPrimaryKeyIndex(string provider)
+    {
+        var model = CreateTable("Accounts");
+        // Simulate introspected PRIMARY index that duplicates the PK
+        model.Indexes.Add(new IndexInfo { Name = "PRIMARY", Columns = ["Id"], IsUnique = true });
+        model.Indexes.Add(new IndexInfo { Name = "IX_Accounts_Name", Columns = ["Name"] });
+
+        var changes = new List<SchemaChange> { new TableAdded("Accounts", "dbo", model) };
+        var results = MigrationSqlGenerator.Generate(provider, changes);
+
+        // Should have CREATE TABLE + CREATE INDEX for Name only (no PRIMARY index)
+        results.ShouldContain(r => r.Sql.Contains("CREATE TABLE"));
+        results.ShouldContain(r => r.Sql.Contains("IX_Accounts_Name"));
+        results.ShouldNotContain(r => r.Sql.Contains("CREATE") && r.Sql.Contains("INDEX") && r.Sql.Contains("PRIMARY"));
+    }
+
+    private static Model CreateView(string name, string schema = "dbo") => new()
+    {
+        Name = name,
+        Schema = schema,
+        IsView = true,
+        SelectSql = "SELECT Id, Name FROM Users WHERE Active = 1",
+        Attributes = [new Attribute { Name = "Id", DataType = "int" }, new Attribute { Name = "Name", DataType = "varchar(100)" }]
+    };
+
+    [Theory]
+    [InlineData("sqlserver")]
+    [InlineData("postgresql")]
+    [InlineData("mysql")]
+    [InlineData("sqlite")]
+    public void ViewAdded_GeneratesCreateView(string provider)
+    {
+        var view = CreateView("ActiveUsers");
+        var changes = new List<SchemaChange> { new ViewAdded("ActiveUsers", "dbo", view) };
+
+        var results = MigrationSqlGenerator.Generate(provider, changes);
+
+        results.ShouldNotBeEmpty();
+        results[0].Sql.ShouldContain("CREATE VIEW");
+        results[0].Sql.ShouldContain("ActiveUsers");
+        results[0].Sql.ShouldContain("SELECT");
+    }
+
+    [Theory]
+    [InlineData("sqlserver")]
+    [InlineData("postgresql")]
+    [InlineData("mysql")]
+    [InlineData("sqlite")]
+    public void ViewRemoved_GeneratesDropView(string provider)
+    {
+        var view = CreateView("ActiveUsers");
+        var changes = new List<SchemaChange> { new ViewRemoved("ActiveUsers", "dbo", view) };
+
+        var results = MigrationSqlGenerator.Generate(provider, changes);
+
+        results.ShouldNotBeEmpty();
+        results[0].Sql.ShouldContain("DROP VIEW");
+        results[0].Sql.ShouldContain("ActiveUsers");
+    }
+
+    [Theory]
+    [InlineData("sqlserver")]
+    [InlineData("postgresql")]
+    [InlineData("mysql")]
+    [InlineData("sqlite")]
+    public void ViewModified_GeneratesDropAndCreate(string provider)
+    {
+        var oldView = CreateView("ActiveUsers");
+        var newView = CreateView("ActiveUsers");
+        newView.SelectSql = "SELECT Id, Name FROM Users WHERE Active = 1 AND Verified = 1";
+        var changes = new List<SchemaChange> { new ViewModified("ActiveUsers", "dbo", oldView, newView) };
+
+        var results = MigrationSqlGenerator.Generate(provider, changes);
+
+        results.Count.ShouldBe(2);
+        results[0].Sql.ShouldContain("DROP VIEW");
+        results[1].Sql.ShouldContain("CREATE VIEW");
+        results[1].Sql.ShouldContain("Verified");
+    }
 }

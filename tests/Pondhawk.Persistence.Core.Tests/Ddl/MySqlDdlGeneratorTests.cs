@@ -161,4 +161,52 @@ public class MySqlDdlGeneratorTests
         var generator = DdlGeneratorFactory.Create("mariadb");
         generator.ShouldBeOfType<MySqlDdlGenerator>();
     }
+
+    [Fact]
+    public void EmptyStringDefault_EmittedAsQuotedLiteral()
+    {
+        var model = new Model
+        {
+            Name = "Users",
+            Attributes =
+            [
+                new Attribute { Name = "Id", DataType = "int", IsPrimaryKey = true, IsIdentity = true },
+                new Attribute { Name = "Bio", DataType = "varchar(500)", DefaultValue = "" }
+            ],
+            PrimaryKey = new PrimaryKeyInfo { Columns = ["Id"] }
+        };
+        var ddl = _generator.Generate([model]);
+        ddl.ShouldContain("DEFAULT ''");
+    }
+
+    [Fact]
+    public void VarcharDefault_EmittedAsQuotedLiteral()
+    {
+        var model = new Model
+        {
+            Name = "Users",
+            Attributes =
+            [
+                new Attribute { Name = "Id", DataType = "int", IsPrimaryKey = true, IsIdentity = true },
+                new Attribute { Name = "Status", DataType = "varchar(50)", DefaultValue = "active" }
+            ],
+            PrimaryKey = new PrimaryKeyInfo { Columns = ["Id"] }
+        };
+        var ddl = _generator.Generate([model]);
+        ddl.ShouldContain("DEFAULT 'active'");
+    }
+
+    [Fact]
+    public void GeneratesCreateView()
+    {
+        var view = new Model
+        {
+            Name = "ActiveUsers", Schema = "mydb", IsView = true,
+            SelectSql = "SELECT id, name FROM users",
+            Attributes = [new Attribute { Name = "id", DataType = "int" }]
+        };
+        var ddl = _generator.Generate([view]);
+        ddl.ShouldContain("CREATE VIEW `ActiveUsers` AS");
+        ddl.ShouldContain("SELECT id, name FROM users");
+    }
 }
