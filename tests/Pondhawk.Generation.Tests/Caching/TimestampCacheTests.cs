@@ -40,6 +40,10 @@ public class TimestampCacheTests : IDisposable
         return path;
     }
 
+    /// <summary>Writes model.json the way an agent does — nothing writes it through the cache.</summary>
+    private void WriteModelFile(ModelFile? model = null)
+        => ModelFileLoader.Save(ModelPath, model ?? SampleModel());
+
     private static ModelFile SampleModel() => new()
     {
         Name = "Sample",
@@ -115,7 +119,7 @@ public class TimestampCacheTests : IDisposable
         _cache.GetTemplate(templatePath);
 
         // Write a schema file and capture the cached instance
-        _cache.SetModel(SampleModel(), ModelPath);
+        WriteModelFile();
         var modelBefore = _cache.GetModel(ModelPath);
 
         // Verify they are cached
@@ -220,7 +224,7 @@ public class TimestampCacheTests : IDisposable
     public void GetModel_ReturnsCached_AfterSet()
     {
         var model = SampleModel();
-        _cache.SetModel(model, ModelPath);
+        WriteModelFile(model);
 
         var cached = _cache.GetModel(ModelPath);
         cached.ShouldNotBeNull();
@@ -229,10 +233,10 @@ public class TimestampCacheTests : IDisposable
     }
 
     [Fact]
-    public void SetModel_WritesModelJsonToDisk()
+    public void GetModel_ReadsWhatWasWrittenToDisk()
     {
         var model = SampleModel();
-        _cache.SetModel(model, ModelPath);
+        WriteModelFile(model);
 
         File.Exists(ModelPath).ShouldBeTrue();
         var json = File.ReadAllText(ModelPath);

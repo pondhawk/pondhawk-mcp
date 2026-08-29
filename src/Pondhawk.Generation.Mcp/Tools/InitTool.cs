@@ -335,14 +335,43 @@ public sealed class InitTool
         | `validate_config` | Checks config, templates and model without generating |
         | `update` | Refreshes AGENTS.md and JSON schemas after upgrading pondhawk |
 
+        ## The model is a project asset
+
+        `model.json` is long-lived. It is committed alongside the templates and the config, it
+        grows over time, and it is yours to maintain — pondhawk only ever reads it. Nothing
+        writes it for you after `init`, so you edit it with ordinary file tools.
+
+        That longevity is the point. The same model plus the same templates produce the same
+        files on every run, which is what makes a generated set consistent rather than merely
+        similar.
+
+        Working on one carries obligations:
+
+        - **Read the existing model before adding to it.** You are extending a document that
+          already has conventions, not starting a new one.
+        - **Reuse the Kinds already in use.** Adding a node of Kind `Field` to a model that
+          says `Property` everywhere else creates a second convention and a second macro, and
+          the set stops being uniform. The same goes for metadata keys: if existing properties
+          carry `Type`, do not introduce `DataType`.
+        - **A new Kind needs a new macro.** `{% dispatch %}` on a Kind with no
+          `Default<Kind>` macro emits an error comment into the generated file rather than
+          failing the run, so it is easy to miss.
+        - **Renaming or removing a node can orphan an override.** Overrides address nodes by
+          path, and a path that no longer matches silently stops applying. `validate_config`
+          reports these, which is the main reason to run it after editing the model.
+
         ## Working on a pondhawk project
 
-        1. Edit `model.json` to describe what to generate.
-        2. Author templates, one `Default<Kind>` macro per Kind.
-        3. Run `validate_config` — it reports unparseable templates, unknown filters, overrides
+        1. Read `model.json` and the templates before changing either.
+        2. Edit `model.json` — adding, changing, or removing nodes.
+        3. Author or adjust templates, one `Default<Kind>` macro per Kind.
+        4. Run `validate_config` — it reports unparseable templates, unknown filters, overrides
            matching no node, and templates whose `AppliesTo` matches no Kind in the model.
-        4. Run `generate`.
-        5. Read a generated file before declaring success. A template that renders empty is
+        5. Run `generate`.
+        6. Read a generated file before declaring success. A template that renders empty is
            skipped silently, and an unknown metadata key renders as nothing rather than failing.
+
+        Steps 4 and 5 are cheap and the model is cached between calls, so run them as often as
+        you like while iterating.
         """;
 }

@@ -96,22 +96,6 @@ public sealed class TimestampCache
     }
 
     /// <summary>
-    /// Writes the model to disk and refreshes the in-memory cache.
-    /// </summary>
-    public void SetModel(ModelFile model, string modelPath)
-    {
-        var dir = Path.GetDirectoryName(modelPath);
-        if (!string.IsNullOrEmpty(dir))
-            Directory.CreateDirectory(dir);
-
-        ModelFileLoader.Save(modelPath, model);
-
-        _cachedModel = model;
-        _modelPath = modelPath;
-        _modelTimestamp = File.GetLastWriteTimeUtc(modelPath);
-    }
-
-    /// <summary>
     /// Invalidates all caches (config, templates, model).
     /// </summary>
     public void InvalidateAll()
