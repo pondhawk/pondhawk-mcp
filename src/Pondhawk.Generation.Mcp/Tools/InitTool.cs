@@ -352,6 +352,11 @@ public sealed class InitTool
         - **A new Kind needs a new macro.** `{% dispatch %}` on a Kind with no
           `Default<Kind>` macro emits an error comment into the generated file rather than
           failing the run, so it is easy to miss.
+        - **A misspelled `Variant` renders the default.** Dispatch falls back to
+          `Default<Kind>` when `<Variant><Kind>` does not exist, so the file looks right and
+          silently ignores the override. `validate_config` now reports this as an error.
+        - **Node names become file paths.** A name containing `..` or a leading separator is
+          refused rather than written outside the output directory.
         - **Renaming or removing a node can orphan an override.** Overrides address nodes by
           path, and a path that no longer matches silently stops applying. `validate_config`
           reports these, which is the main reason to run it after editing the model.
@@ -361,11 +366,14 @@ public sealed class InitTool
         1. Read `model.json` and the templates before changing either.
         2. Edit `model.json` — adding, changing, or removing nodes.
         3. Author or adjust templates, one `Default<Kind>` macro per Kind.
-        4. Run `validate_config` — it reports unparseable templates, unknown filters, overrides
-           matching no node, and templates whose `AppliesTo` matches no Kind in the model.
+        4. Run `validate_config`. It reports unparseable templates, unknown filters, a model that
+           violates its schema, overrides matching no node, templates whose `AppliesTo` matches no
+           Kind in the model, and — the one that matters most — an override naming a variant macro
+           the template does not declare.
         5. Run `generate`.
-        6. Read a generated file before declaring success. A template that renders empty is
-           skipped silently, and an unknown metadata key renders as nothing rather than failing.
+        6. Check `Success` in the `generate` result, then read a generated file. A template that
+           renders empty is skipped silently, and an unknown metadata key renders as nothing
+           rather than failing.
 
         Steps 4 and 5 are cheap and the model is cached between calls, so run them as often as
         you like while iterating.

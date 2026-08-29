@@ -53,8 +53,8 @@ public static class ConfigurationValidator
         var model = LoadModel(projectDir, result);
 
         ValidateRequiredSections(config, result);
-        ValidateTemplates(config, projectDir, model, result);
-        ValidateOverrides(config, model, result);
+        var macrosByTemplate = ValidateTemplates(config, projectDir, model, result);
+        ValidateOverrides(config, model, macrosByTemplate, result);
         ValidateLogging(config, result);
         CheckUnresolvedEnvVars(config, result);
         CheckOutputPathCollisions(config, result);
@@ -73,7 +73,11 @@ public static class ConfigurationValidator
 
         try
         {
-            return ModelFileLoader.Load(modelPath);
+            var json = File.ReadAllText(modelPath);
+            foreach (var error in ModelFileSchema.Validate(json))
+                result.Errors.Add($"model.json: {error}");
+
+            return ModelFileLoader.Deserialize(json);
         }
         catch (Exception ex)
         {
@@ -91,8 +95,11 @@ public static class ConfigurationValidator
             result.Errors.Add("Required section 'Templates' is missing or empty");
     }
 
-    private static void ValidateTemplates(ProjectConfiguration config, string projectDir, ModelFile? model, ValidationResult result)
+    /// <summary>Validates each template and returns the macro names each one declares.</summary>
+    private static Dictionary<string, HashSet<string>> ValidateTemplates(
+        ProjectConfiguration config, string projectDir, ModelFile? model, ValidationResult result)
     {
+        var macrosByTemplate = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
         var parser = TemplateEngine.CreateParser();
         var kinds = model is null
             ? null
@@ -115,6 +122,8 @@ public static class ConfigurationValidator
 
                     foreach (var filterName in TemplateEngine.ValidateFilterNames(source))
                         result.Warnings.Add($"Template '{key}': Unknown filter '{filterName}' in '{template.Path}'");
+
+                    macrosByTemplate[key] = TemplateEngine.ExtractMacroNames(source);
                 }
             }
 
@@ -143,9 +152,15 @@ public static class ConfigurationValidator
                     $"(present: {string.Join(", ", kinds.Order())}) — this template will generate nothing");
             }
         }
+
+        return macrosByTemplate;
     }
 
-    private static void ValidateOverrides(ProjectConfiguration config, ModelFile? model, ValidationResult result)
+    private static void ValidateOverrides(
+        ProjectConfiguration config,
+        ModelFile? model,
+        Dictionary<string, HashSet<string>> macrosByTemplate,
+        ValidationResult result)
     {
         foreach (var ovr in config.Overrides)
         {
@@ -164,13 +179,57 @@ public static class ConfigurationValidator
             if (!string.IsNullOrEmpty(ovr.Artifact) && !config.Templates.ContainsKey(ovr.Artifact))
                 result.Errors.Add($"Override '{ovr.Path}': Artifact '{ovr.Artifact}' is not a configured template");
 
+            if (model is null)
+                continue;
+
+            var matched = model.Nodes
+                .SelectMany(n => n.Descend())
+                .Where(d => OverrideResolver.MatchesPath(ovr.Path, d.Path))
+                .ToList();
+
             // A path matching nothing is almost always a typo, and silently generates the
             // unmodified artifact — the failure mode this tool exists to prevent.
-            if (model is not null
-                && !model.Nodes.SelectMany(n => n.Descend()).Any(d => OverrideResolver.MatchesPath(ovr.Path, d.Path)))
+            if (matched.Count == 0)
             {
                 result.Warnings.Add($"Override '{ovr.Path}': matches no node in model.json");
+                continue;
             }
+
+            ValidateVariantMacroExists(ovr, matched, macrosByTemplate, result);
+        }
+    }
+
+    /// <summary>
+    /// Checks that the variant an override names resolves to a macro the artifact's template
+    /// declares. Dispatch builds the macro name as {Variant}{Kind} and silently falls back to
+    /// Default{Kind} when it is missing, so a misspelled variant renders the default and the
+    /// generated file looks correct while ignoring the override entirely.
+    /// </summary>
+    private static void ValidateVariantMacroExists(
+        OverrideConfig ovr,
+        List<(Node Node, string Path)> matched,
+        Dictionary<string, HashSet<string>> macrosByTemplate,
+        ValidationResult result)
+    {
+        if (string.IsNullOrEmpty(ovr.Variant) || string.IsNullOrEmpty(ovr.Artifact))
+            return;
+
+        if (!macrosByTemplate.TryGetValue(ovr.Artifact, out var macros))
+            return; // template unreadable — already reported
+
+        foreach (var kind in matched.Select(m => m.Node.Kind).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var expected = $"{ovr.Variant}{kind}";
+            if (macros.Contains(expected))
+                continue;
+
+            var suggestion = macros.FirstOrDefault(m => m.EndsWith(kind, StringComparison.OrdinalIgnoreCase)
+                                                        && !m.StartsWith("Default", StringComparison.OrdinalIgnoreCase));
+
+            result.Errors.Add(
+                $"Override '{ovr.Path}': template '{ovr.Artifact}' declares no macro '{expected}', "
+                + $"so matched {kind} nodes would silently render through 'Default{kind}' instead"
+                + (suggestion is not null ? $". Did you mean '{suggestion}'?" : "."));
         }
     }
 

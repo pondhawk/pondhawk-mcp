@@ -28,6 +28,19 @@ public sealed partial class TemplateEngine
     [GeneratedRegex(@"\|\s*(\w+)", RegexOptions.Compiled)]
     private static partial Regex FilterUsageRegex();
 
+    [GeneratedRegex(@"\{%-?\s*macro\s+(\w+)\s*\(", RegexOptions.Compiled)]
+    private static partial Regex MacroDeclarationRegex();
+
+    /// <summary>
+    /// Names of the macros a template declares. Used to check that a variant named by an
+    /// override actually resolves — dispatch falls back to Default&lt;Kind&gt; when it does
+    /// not, which produces plausible but wrong output with no other signal.
+    /// </summary>
+    public static HashSet<string> ExtractMacroNames(string templateSource)
+        => MacroDeclarationRegex().Matches(templateSource)
+            .Select(m => m.Groups[1].Value)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>
     /// Validates filter names in a template source string. Returns a list of unknown filter names.
     /// Uses regex-based extraction so may have false positives in string literals.

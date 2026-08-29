@@ -7,6 +7,11 @@ namespace Pondhawk.Generation.Caching;
 
 public sealed class TimestampCache
 {
+    // An MCP server may handle tool calls concurrently, and every accessor here both reads
+    // and mutates cached state. Monitor is re-entrant, so GetConfiguration calling
+    // InvalidateAll while holding the gate is fine.
+    private readonly object _gate = new();
+
     private readonly TemplateEngine _templateEngine;
 
     private string? _configPath;
@@ -30,22 +35,25 @@ public sealed class TimestampCache
     /// </summary>
     public ProjectConfiguration GetConfiguration(string configPath)
     {
-        var currentTimestamp = File.GetLastWriteTimeUtc(configPath);
-
-        if (_cachedConfig is not null && _configPath == configPath && _configTimestamp == currentTimestamp)
+        lock (_gate)
         {
+            var currentTimestamp = File.GetLastWriteTimeUtc(configPath);
+
+            if (_cachedConfig is not null && _configPath == configPath && _configTimestamp == currentTimestamp)
+            {
+                return _cachedConfig;
+            }
+
+            // Config changed or first load — invalidate config, templates, and model. The model
+            // must go too: overrides from config are applied to node metadata, so a cached tree
+            // would carry rules that the edited config no longer declares.
+            InvalidateAll();
+
+            _configPath = configPath;
+            _configTimestamp = currentTimestamp;
+            _cachedConfig = ProjectConfigurationLoader.Load(configPath);
             return _cachedConfig;
-        }
-
-        // Config changed or first load — invalidate config, templates, and model. The model
-        // must go too: overrides from config are applied to node metadata, so a cached tree
-        // would carry rules that the edited config no longer declares.
-        InvalidateAll();
-
-        _configPath = configPath;
-        _configTimestamp = currentTimestamp;
-        _cachedConfig = ProjectConfigurationLoader.Load(configPath);
-        return _cachedConfig;
+    }
     }
 
     /// <summary>
@@ -53,24 +61,27 @@ public sealed class TimestampCache
     /// </summary>
     public IFluidTemplate GetTemplate(string templatePath)
     {
-        var currentTimestamp = File.GetLastWriteTimeUtc(templatePath);
-
-        if (_compiledTemplates.TryGetValue(templatePath, out var cached) &&
-            _templateTimestamps.TryGetValue(templatePath, out var cachedTs) &&
-            cachedTs == currentTimestamp)
+        lock (_gate)
         {
-            return cached;
-        }
+            var currentTimestamp = File.GetLastWriteTimeUtc(templatePath);
 
-        var source = File.ReadAllText(templatePath);
-        if (!_templateEngine.TryParse(source, out var template, out var error))
-        {
-            throw new InvalidOperationException($"Failed to parse template '{templatePath}': {error}");
-        }
+            if (_compiledTemplates.TryGetValue(templatePath, out var cached) &&
+                _templateTimestamps.TryGetValue(templatePath, out var cachedTs) &&
+                cachedTs == currentTimestamp)
+            {
+                return cached;
+            }
 
-        _templateTimestamps[templatePath] = currentTimestamp;
-        _compiledTemplates[templatePath] = template;
-        return template;
+            var source = File.ReadAllText(templatePath);
+            if (!_templateEngine.TryParse(source, out var template, out var error))
+            {
+                throw new InvalidOperationException($"Failed to parse template '{templatePath}': {error}");
+            }
+
+            _templateTimestamps[templatePath] = currentTimestamp;
+            _compiledTemplates[templatePath] = template;
+            return template;
+    }
     }
 
     /// <summary>
@@ -79,20 +90,23 @@ public sealed class TimestampCache
     /// </summary>
     public ModelFile? GetModel(string modelPath)
     {
-        if (!File.Exists(modelPath))
-            return null;
-
-        var currentTimestamp = File.GetLastWriteTimeUtc(modelPath);
-
-        if (_cachedModel is not null && _modelPath == modelPath && _modelTimestamp == currentTimestamp)
+        lock (_gate)
         {
-            return _cachedModel;
-        }
+            if (!File.Exists(modelPath))
+                return null;
 
-        _cachedModel = ModelFileLoader.Load(modelPath);
-        _modelPath = modelPath;
-        _modelTimestamp = currentTimestamp;
-        return _cachedModel;
+            var currentTimestamp = File.GetLastWriteTimeUtc(modelPath);
+
+            if (_cachedModel is not null && _modelPath == modelPath && _modelTimestamp == currentTimestamp)
+            {
+                return _cachedModel;
+            }
+
+            _cachedModel = ModelFileLoader.Load(modelPath);
+            _modelPath = modelPath;
+            _modelTimestamp = currentTimestamp;
+            return _cachedModel;
+    }
     }
 
     /// <summary>
@@ -100,14 +114,17 @@ public sealed class TimestampCache
     /// </summary>
     public void InvalidateAll()
     {
-        _cachedConfig = null;
-        _configPath = null;
-        _configTimestamp = default;
-        _templateTimestamps.Clear();
-        _compiledTemplates.Clear();
-        _cachedModel = null;
-        _modelPath = null;
-        _modelTimestamp = default;
+        lock (_gate)
+        {
+            _cachedConfig = null;
+            _configPath = null;
+            _configTimestamp = default;
+            _templateTimestamps.Clear();
+            _compiledTemplates.Clear();
+            _cachedModel = null;
+            _modelPath = null;
+            _modelTimestamp = default;
+    }
     }
 
     /// <summary>
@@ -115,8 +132,11 @@ public sealed class TimestampCache
     /// </summary>
     public void InvalidateTemplate(string templatePath)
     {
-        _templateTimestamps.Remove(templatePath);
-        _compiledTemplates.Remove(templatePath);
+        lock (_gate)
+        {
+            _templateTimestamps.Remove(templatePath);
+            _compiledTemplates.Remove(templatePath);
+    }
     }
 
     /// <summary>
@@ -125,11 +145,14 @@ public sealed class TimestampCache
     /// </summary>
     public bool IsConfigStale(string configPath)
     {
-        if (_cachedConfig is null || _configPath != configPath)
-            return true;
+        lock (_gate)
+        {
+            if (_cachedConfig is null || _configPath != configPath)
+                return true;
 
-        var currentTimestamp = File.GetLastWriteTimeUtc(configPath);
-        return _configTimestamp != currentTimestamp;
+            var currentTimestamp = File.GetLastWriteTimeUtc(configPath);
+            return _configTimestamp != currentTimestamp;
+    }
     }
 
     /// <summary>
@@ -138,11 +161,14 @@ public sealed class TimestampCache
     /// </summary>
     public bool IsTemplateStale(string templatePath)
     {
-        if (!_templateTimestamps.TryGetValue(templatePath, out var cachedTs))
-            return true;
+        lock (_gate)
+        {
+            if (!_templateTimestamps.TryGetValue(templatePath, out var cachedTs))
+                return true;
 
-        var currentTimestamp = File.GetLastWriteTimeUtc(templatePath);
-        return cachedTs != currentTimestamp;
+            var currentTimestamp = File.GetLastWriteTimeUtc(templatePath);
+            return cachedTs != currentTimestamp;
+    }
     }
 
     /// <summary>

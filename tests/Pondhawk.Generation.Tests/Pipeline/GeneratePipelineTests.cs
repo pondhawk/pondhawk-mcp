@@ -155,13 +155,14 @@ public class GeneratePipelineTests : IDisposable
     public void RenderedContentWritesThroughFileWriter()
     {
         var content = Generate("entity", [], out _);
-        var path = Path.Combine(_tempDir, "Product.generated.cs");
+        const string name = "Product.generated.cs";
+        var path = Path.Combine(_tempDir, name);
 
-        FileWriter.WriteFile(path, content, "Always").Action.ShouldBe("Created");
+        FileWriter.WriteFile(_tempDir, name, content, "Always").Action.ShouldBe("Created");
         File.ReadAllText(path).ShouldContain("public partial class Product");
 
-        FileWriter.WriteFile(path, content, "Always").Action.ShouldBe("Overwritten");
-        FileWriter.WriteFile(path, content, "SkipExisting").Action.ShouldBe("SkippedExisting");
+        FileWriter.WriteFile(_tempDir, name, content, "Always").Action.ShouldBe("Overwritten");
+        FileWriter.WriteFile(_tempDir, name, content, "SkipExisting").Action.ShouldBe("SkippedExisting");
     }
 
     [Fact]

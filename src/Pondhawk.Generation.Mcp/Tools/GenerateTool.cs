@@ -95,7 +95,7 @@ public sealed class GenerateTool
 
                         var content = ctx.TemplateEngine.Render(compiledTemplate, context);
                         var outputFileName = ResolveOutputPattern(ctx, templateConfig.OutputPattern, resolved[0]);
-                        var result = FileWriter.WriteFile(Path.Combine(outputDir, outputFileName), content, templateConfig.Mode);
+                        var result = FileWriter.WriteFile(outputDir, outputFileName, content, templateConfig.Mode);
 
                         filesWritten.Add(new { Path = Path.GetRelativePath(outputDir, result.Path), result.Action });
                         Tally(result.Action, ref created, ref overwritten, ref skipped);
@@ -120,7 +120,7 @@ public sealed class GenerateTool
 
                     var content = ctx.TemplateEngine.Render(compiledTemplate, context);
                     var outputFileName = ResolveOutputPattern(ctx, templateConfig.OutputPattern, null);
-                    var result = FileWriter.WriteFile(Path.Combine(outputDir, outputFileName), content, templateConfig.Mode);
+                    var result = FileWriter.WriteFile(outputDir, outputFileName, content, templateConfig.Mode);
 
                     filesWritten.Add(new { Path = Path.GetRelativePath(outputDir, result.Path), result.Action });
                     Tally(result.Action, ref created, ref overwritten, ref skipped);
@@ -134,11 +134,14 @@ public sealed class GenerateTool
             }
         }
 
+        // Failures lead: a caller skimming the summary should not have to reach the end of
+        // the sentence to discover the run produced nothing but errors.
         var parts = new List<string>();
+        if (failed > 0) parts.Add($"{failed} files FAILED");
         if (overwritten > 0) parts.Add($"{overwritten} files written");
         if (created > 0) parts.Add($"{created} files created");
         if (skipped > 0) parts.Add($"{skipped} files skipped");
-        if (failed > 0) parts.Add($"{failed} files failed");
+        if (parts.Count == 0) parts.Add("nothing to generate — no nodes matched any template");
 
         sw.Stop();
         logger.LogInformation("Tool generate completed in {Duration}ms — {Summary}", sw.ElapsedMilliseconds, string.Join(", ", parts));
@@ -147,6 +150,11 @@ public sealed class GenerateTool
 
         return JsonSerializer.Serialize(new
         {
+            Success = failed == 0,
+            Created = created,
+            Overwritten = overwritten,
+            Skipped = skipped,
+            Failed = failed,
             OutputDir = outputDir,
             FilesWritten = filesWritten,
             Summary = string.Join(", ", parts)

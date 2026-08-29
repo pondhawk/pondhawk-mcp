@@ -196,7 +196,8 @@ sudo mv pondhawk-generation-mcp-linux /usr/local/bin/pondhawk-generation-mcp</co
 }</code></pre>
 <p>
   The <code>--project</code> argument points at the directory holding
-  <code>pondhawk.project.json</code>. The server reads and writes only inside that directory.
+  <code>pondhawk.project.json</code>. The server reads and writes only inside that directory —
+  a rendered output path that would escape <code>OutputDir</code> is refused rather than written.
 </p>
 
 <!-- ───────────────────── Getting Started ───────────────────── -->
@@ -373,7 +374,7 @@ public partial class {{ c.Name | pascal_case }}
   </div>
   <div class="card">
     <h4>validate_config</h4>
-    <p>Checks the config, templates and model without generating anything. Reports errors and warnings.</p>
+    <p>Checks the config, templates and model without generating anything. Catches misspelled variant macros, overrides matching no node, and models violating their schema.</p>
     <p class="params">no parameters</p>
   </div>
   <div class="card">
@@ -454,6 +455,17 @@ LICENCE_KEY=xxxxxxxx</code></pre>
 
 <!-- ───────────────────── Tips ───────────────────── -->
 <h2 id="tips">Tips</h2>
+<div class="tip">
+  <strong>A misspelled <code>Variant</code> silently renders the default.</strong> Dispatch falls
+  back to <code>Default&lt;Kind&gt;</code> when the variant macro does not exist, so the file looks
+  correct and ignores the override. <code>validate_config</code> reports this as an error — it is
+  the single most valuable thing it checks.
+</div>
+<div class="tip">
+  <strong>Check <code>Success</code> in the generate result.</strong> Individual files can fail
+  without stopping the run; the result carries explicit <code>Success</code>, <code>Failed</code>
+  and per-file detail.
+</div>
 <div class="tip">
   <strong>Read a generated file before declaring success.</strong> A template that renders
   empty is skipped silently, and an unknown metadata key renders as nothing rather than

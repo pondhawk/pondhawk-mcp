@@ -22,8 +22,9 @@ public class FileWriterTests : IDisposable
     [Fact]
     public void WriteFile_Always_CreatesNewFile()
     {
-        var path = Path.Combine(_tempDir, "test.cs");
-        var result = FileWriter.WriteFile(path, "content", "Always");
+        var name = Path.Combine("test.cs");
+        var path = Path.Combine(_tempDir, name);
+        var result = FileWriter.WriteFile(_tempDir, name, "content", "Always");
 
         result.Action.ShouldBe("Created");
         File.Exists(path).ShouldBeTrue();
@@ -33,10 +34,11 @@ public class FileWriterTests : IDisposable
     [Fact]
     public void WriteFile_Always_OverwritesExisting()
     {
-        var path = Path.Combine(_tempDir, "test.cs");
+        var name = Path.Combine("test.cs");
+        var path = Path.Combine(_tempDir, name);
         File.WriteAllText(path, "old");
 
-        var result = FileWriter.WriteFile(path, "new", "Always");
+        var result = FileWriter.WriteFile(_tempDir, name, "new", "Always");
 
         result.Action.ShouldBe("Overwritten");
         File.ReadAllText(path).ShouldBe("new");
@@ -45,10 +47,11 @@ public class FileWriterTests : IDisposable
     [Fact]
     public void WriteFile_SkipExisting_SkipsExistingFile()
     {
-        var path = Path.Combine(_tempDir, "test.cs");
+        var name = Path.Combine("test.cs");
+        var path = Path.Combine(_tempDir, name);
         File.WriteAllText(path, "original");
 
-        var result = FileWriter.WriteFile(path, "new", "SkipExisting");
+        var result = FileWriter.WriteFile(_tempDir, name, "new", "SkipExisting");
 
         result.Action.ShouldBe("SkippedExisting");
         File.ReadAllText(path).ShouldBe("original");
@@ -57,9 +60,10 @@ public class FileWriterTests : IDisposable
     [Fact]
     public void WriteFile_SkipExisting_CreatesNewFile()
     {
-        var path = Path.Combine(_tempDir, "new.cs");
+        var name = Path.Combine("new.cs");
+        var path = Path.Combine(_tempDir, name);
 
-        var result = FileWriter.WriteFile(path, "content", "SkipExisting");
+        var result = FileWriter.WriteFile(_tempDir, name, "content", "SkipExisting");
 
         result.Action.ShouldBe("Created");
         File.Exists(path).ShouldBeTrue();
@@ -68,9 +72,10 @@ public class FileWriterTests : IDisposable
     [Fact]
     public void WriteFile_CreatesDirectories()
     {
-        var path = Path.Combine(_tempDir, "sub", "dir", "test.cs");
+        var name = Path.Combine("sub", "dir", "test.cs");
+        var path = Path.Combine(_tempDir, name);
 
-        FileWriter.WriteFile(path, "content", "Always");
+        FileWriter.WriteFile(_tempDir, name, "content", "Always");
 
         File.Exists(path).ShouldBeTrue();
     }
@@ -78,8 +83,9 @@ public class FileWriterTests : IDisposable
     [Fact]
     public void WriteFile_Utf8NoBom()
     {
-        var path = Path.Combine(_tempDir, "test.cs");
-        FileWriter.WriteFile(path, "content", "Always");
+        var name = Path.Combine("test.cs");
+        var path = Path.Combine(_tempDir, name);
+        FileWriter.WriteFile(_tempDir, name, "content", "Always");
 
         var bytes = File.ReadAllBytes(path);
         // UTF-8 BOM would be EF BB BF
@@ -89,8 +95,9 @@ public class FileWriterTests : IDisposable
     [Fact]
     public void WriteFile_EmptyContent_SkippedEmpty()
     {
-        var path = Path.Combine(_tempDir, "empty.cs");
-        var result = FileWriter.WriteFile(path, "", "Always");
+        var name = Path.Combine("empty.cs");
+        var path = Path.Combine(_tempDir, name);
+        var result = FileWriter.WriteFile(_tempDir, name, "", "Always");
 
         result.Action.ShouldBe("SkippedEmpty");
         File.Exists(path).ShouldBeFalse();
@@ -99,8 +106,9 @@ public class FileWriterTests : IDisposable
     [Fact]
     public void WriteFile_WhitespaceContent_SkippedEmpty()
     {
-        var path = Path.Combine(_tempDir, "ws.cs");
-        var result = FileWriter.WriteFile(path, "   \n  \t  ", "Always");
+        var name = Path.Combine("ws.cs");
+        var path = Path.Combine(_tempDir, name);
+        var result = FileWriter.WriteFile(_tempDir, name, "   \n  \t  ", "Always");
 
         result.Action.ShouldBe("SkippedEmpty");
         File.Exists(path).ShouldBeFalse();
@@ -109,8 +117,9 @@ public class FileWriterTests : IDisposable
     [Fact]
     public void WriteFile_ReturnsRelativePath()
     {
-        var path = Path.Combine(_tempDir, "sub", "result.cs");
-        var result = FileWriter.WriteFile(path, "content", "Always");
+        var name = Path.Combine("sub", "result.cs");
+        var path = Path.Combine(_tempDir, name);
+        var result = FileWriter.WriteFile(_tempDir, name, "content", "Always");
 
         result.Path.ShouldBe(path);
     }
@@ -118,10 +127,55 @@ public class FileWriterTests : IDisposable
     [Fact]
     public void WriteFile_UnicodeContent_PreservedCorrectly()
     {
-        var path = Path.Combine(_tempDir, "unicode.cs");
+        var name = Path.Combine("unicode.cs");
+        var path = Path.Combine(_tempDir, name);
         var content = "// Commentaire fran\u00e7ais \u2014 \u00e9l\u00e8ve";
-        FileWriter.WriteFile(path, content, "Always");
+        FileWriter.WriteFile(_tempDir, name, content, "Always");
 
         File.ReadAllText(path).ShouldBe(content);
+    }
+
+    // --- containment: output paths are rendered from node names, so they are only as
+    // --- trustworthy as the input model.
+
+    [Theory]
+    [InlineData("../escaped.cs")]
+    [InlineData("../../escaped.cs")]
+    [InlineData("sub/../../escaped.cs")]
+    public void WriteFile_RelativeEscape_Throws(string relativePath)
+    {
+        var ex = Should.Throw<InvalidOperationException>(
+            () => FileWriter.WriteFile(_tempDir, relativePath, "content", "Always"));
+
+        ex.Message.ShouldContain("outside the output directory");
+        Directory.GetParent(_tempDir)!.GetFiles("escaped.cs").ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void WriteFile_AbsolutePath_Throws()
+    {
+        // Path.Combine discards the root entirely when the second argument is rooted.
+        var absolute = Path.Combine(Path.GetTempPath(), $"pondhawk_absolute_{Guid.NewGuid():N}.cs");
+
+        Should.Throw<InvalidOperationException>(
+            () => FileWriter.WriteFile(_tempDir, absolute, "content", "Always"));
+
+        File.Exists(absolute).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void WriteFile_NestedRelativePathWithinRoot_IsAllowed()
+    {
+        var result = FileWriter.WriteFile(_tempDir, "a/b/../c/file.cs", "content", "Always");
+
+        result.Action.ShouldBe("Created");
+        File.Exists(Path.Combine(_tempDir, "a", "c", "file.cs")).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void ResolveContained_ReturnsFullPathForContainedInput()
+    {
+        FileWriter.ResolveContained(_tempDir, "sub/file.cs")
+            .ShouldBe(Path.GetFullPath(Path.Combine(_tempDir, "sub", "file.cs")));
     }
 }

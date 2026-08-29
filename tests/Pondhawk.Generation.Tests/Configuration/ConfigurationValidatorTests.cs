@@ -364,4 +364,115 @@ public class ConfigurationValidatorTests : IDisposable
         var config = ProjectConfigurationLoader.Deserialize(json);
         ConfigurationValidator.Validate(json, config, _tempDir).Errors.ShouldBeEmpty();
     }
+
+    // --- variant macros: dispatch silently falls back to Default<Kind> when the variant
+    // --- macro is missing, so a misspelled variant produces plausible but wrong output.
+
+    private void WriteTemplateWithMacros(params string[] macroNames)
+        => WriteTemplate("entity.liquid", string.Join("\n",
+            macroNames.Select(m => $"{{%- macro {m}(x) %}}{{{{ x.Name }}}}{{%- endmacro %}}")));
+
+    [Fact]
+    public void OverrideNamingAMissingVariantMacro_IsAnError()
+    {
+        WriteModel("""
+            { "Nodes": [ { "Name": "Product", "Kind": "Class",
+              "Children": [ { "Name": "Price", "Kind": "Property" } ] } ] }
+            """);
+        WriteTemplateWithMacros("DefaultClass", "DefaultProperty", "CurrencyProperty");
+
+        var config = ValidConfig();
+        config.Overrides.Add(new OverrideConfig
+        {
+            Path = "Product/Price", Artifact = "entity", Variant = "Curency"   // typo
+        });
+
+        var result = Validate(config);
+        result.Valid.ShouldBeFalse();
+        result.Errors.ShouldContain(e => e.Contains("CurencyProperty") && e.Contains("DefaultProperty"));
+    }
+
+    [Fact]
+    public void OverrideNamingAMissingVariantMacro_SuggestsTheLikelyMacro()
+    {
+        WriteModel("""
+            { "Nodes": [ { "Name": "Product", "Kind": "Class",
+              "Children": [ { "Name": "Price", "Kind": "Property" } ] } ] }
+            """);
+        WriteTemplateWithMacros("DefaultProperty", "CurrencyProperty");
+
+        var config = ValidConfig();
+        config.Overrides.Add(new OverrideConfig { Path = "Product/Price", Artifact = "entity", Variant = "Curency" });
+
+        Validate(config).Errors.ShouldContain(e => e.Contains("Did you mean 'CurrencyProperty'?"));
+    }
+
+    [Fact]
+    public void OverrideNamingAnExistingVariantMacro_IsClean()
+    {
+        WriteModel("""
+            { "Nodes": [ { "Name": "Product", "Kind": "Class",
+              "Children": [ { "Name": "Price", "Kind": "Property" } ] } ] }
+            """);
+        WriteTemplateWithMacros("DefaultProperty", "CurrencyProperty");
+
+        var config = ValidConfig();
+        config.Overrides.Add(new OverrideConfig { Path = "Product/Price", Artifact = "entity", Variant = "Currency" });
+
+        var result = Validate(config);
+        result.Errors.ShouldBeEmpty();
+        result.Warnings.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void VariantMacroIsCheckedPerMatchedKind()
+    {
+        // One override can match nodes of different Kinds; each needs its own macro.
+        WriteModel("""
+            { "Nodes": [ { "Name": "Product", "Kind": "Class",
+              "Children": [ { "Name": "Audited", "Kind": "Property" } ] },
+              { "Name": "Audited", "Kind": "Class" } ] }
+            """);
+        WriteTemplateWithMacros("DefaultClass", "DefaultProperty", "TrackedProperty");
+
+        var config = ValidConfig();
+        config.Overrides.Add(new OverrideConfig { Path = "**/Audited", Artifact = "entity", Variant = "Tracked" });
+
+        // TrackedProperty exists; TrackedClass does not.
+        var result = Validate(config);
+        result.Errors.ShouldContain(e => e.Contains("TrackedClass"));
+        result.Errors.ShouldNotContain(e => e.Contains("TrackedProperty"));
+    }
+
+    [Fact]
+    public void MissingVariantMacro_NotReportedWhenPathMatchesNothing()
+    {
+        WriteModel("""{ "Nodes": [ { "Name": "Product", "Kind": "Class" } ] }""");
+        WriteTemplateWithMacros("DefaultClass");
+
+        var config = ValidConfig();
+        config.Overrides.Add(new OverrideConfig { Path = "Nope/Nothing", Artifact = "entity", Variant = "Whatever" });
+
+        var result = Validate(config);
+        result.Warnings.ShouldContain(w => w.Contains("matches no node"));
+        result.Errors.ShouldBeEmpty();
+    }
+
+    // --- model.schema.json is now actually enforced, not just written for editors ---
+
+    [Fact]
+    public void ModelViolatingItsSchema_IsAnError()
+    {
+        WriteModel("""{ "Nodes": [ { "Name": "Product", "Kind": "" } ] }""");
+
+        Validate(ValidConfig()).Errors.ShouldContain(e => e.Contains("model.json"));
+    }
+
+    [Fact]
+    public void ModelWithNodesNotAnArray_IsAnError()
+    {
+        WriteModel("""{ "Nodes": { "Name": "Product" } }""");
+
+        Validate(ValidConfig()).Errors.ShouldContain(e => e.Contains("model.json"));
+    }
 }

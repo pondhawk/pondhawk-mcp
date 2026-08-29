@@ -81,7 +81,7 @@ When one node needs to render differently, define a `<Variant><Kind>` macro and 
 { "Path": "Product/Price", "Artifact": "entity", "Variant": "Currency" }
 ```
 
-Dispatch falls back to `Default<Kind>` when a variant macro is missing, so an override naming a macro you have not written yet degrades rather than breaking.
+Dispatch falls back to `Default<Kind>` when a variant macro is missing, so an override naming a macro you have not written yet degrades rather than breaking the run. That fallback is also silent, so `validate_config` reports a variant with no matching macro as an error — otherwise a misspelled `Variant` produces a file that looks correct and ignores the override.
 
 ## Overrides
 
@@ -134,7 +134,7 @@ Edit `model.json`, then author templates with one `Default<Kind>` macro per kind
 Validate the config, then generate
 ```
 
-`validate_config` reports unparseable templates, unknown filters, overrides matching no node, and templates whose `AppliesTo` matches no kind in the model — all of which otherwise generate nothing silently.
+`validate_config` reports unparseable templates, unknown filters, a model violating its schema, overrides matching no node, templates whose `AppliesTo` matches no kind in the model, and overrides naming a variant macro no template declares — all of which otherwise produce wrong output silently.
 
 ## MCP Tools
 
@@ -180,6 +180,8 @@ All settings live in `pondhawk.project.json`:
 - **Mode** — `Always` overwrites every run; `SkipExisting` writes once and then leaves the file alone.
 - **AppliesTo** — restricts a template to top-level nodes of one `Kind`. Omit for all.
 - **Values** — anything templates need, as `{{ values.X }}`. String values support `${VAR}` substitution from `.env`.
+
+Rendered output paths are confined to `OutputDir`. A node name containing `..` or a leading separator is refused rather than written elsewhere, and `generate` returns `Success: false` with the offending file listed.
 
 ### The two-file pattern
 

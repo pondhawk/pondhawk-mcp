@@ -382,4 +382,87 @@ public class GenerateToolTests : IDisposable
 
         File.ReadAllText(Output("Orders.cs")).ShouldBe("CustomerId;");
     }
+
+    // --- output containment ---
+
+    [Fact]
+    public void Generate_NodeNameEscapingOutputDir_FailsThatFileAndWritesNothingOutside()
+    {
+        WriteModel("""
+            {
+              "Nodes": [
+                { "Name": "../../escaped", "Kind": "Class" },
+                { "Name": "normal",        "Kind": "Class" }
+              ]
+            }
+            """);
+
+        var json = GenerateTool.Execute(CreateContext());
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        root.GetProperty("Success").GetBoolean().ShouldBeFalse();
+        root.GetProperty("Failed").GetInt32().ShouldBe(1);
+        json.ShouldContain("outside the output directory");
+
+        // The escaping node fails; its well-behaved sibling still generates.
+        File.Exists(Output("normal.cs")).ShouldBeTrue();
+        Directory.GetParent(_outputDir)!.Parent!
+            .GetFiles("escaped.cs", SearchOption.TopDirectoryOnly).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Generate_NodeNameThatIsAnAbsolutePath_Fails()
+    {
+        var absolute = Path.Combine(Path.GetTempPath(), $"pondhawk_esc_{Guid.NewGuid():N}");
+        WriteModel($$"""
+            { "Nodes": [ { "Name": {{JsonSerializer.Serialize(absolute)}}, "Kind": "Class" } ] }
+            """);
+
+        var json = GenerateTool.Execute(CreateContext());
+
+        JsonDocument.Parse(json).RootElement.GetProperty("Success").GetBoolean().ShouldBeFalse();
+        File.Exists(absolute + ".cs").ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Generate_NestedOutputPathWithinOutputDir_StillWorks()
+    {
+        GenerateTool.Execute(CreateContext(outputPattern: "Entities/Nested/{{ item.Name }}.cs"));
+
+        File.Exists(Path.Combine(_outputDir, "Entities", "Nested", "Products.cs")).ShouldBeTrue();
+    }
+
+    // --- honest reporting ---
+
+    [Fact]
+    public void Generate_AllSucceeded_ReportsSuccess()
+    {
+        var json = GenerateTool.Execute(CreateContext());
+        var root = JsonDocument.Parse(json).RootElement;
+
+        root.GetProperty("Success").GetBoolean().ShouldBeTrue();
+        root.GetProperty("Failed").GetInt32().ShouldBe(0);
+        root.GetProperty("Created").GetInt32().ShouldBe(3);
+    }
+
+    [Fact]
+    public void Generate_SummaryLeadsWithFailures()
+    {
+        WriteModel("""{ "Nodes": [ { "Name": "../../escaped", "Kind": "Class" } ] }""");
+
+        var summary = JsonDocument.Parse(GenerateTool.Execute(CreateContext()))
+            .RootElement.GetProperty("Summary").GetString()!;
+
+        summary.ShouldStartWith("1 files FAILED");
+    }
+
+    [Fact]
+    public void Generate_NothingMatched_SaysSoRatherThanReportingAnEmptySuccess()
+    {
+        var summary = JsonDocument.Parse(GenerateTool.Execute(CreateContext(appliesTo: "NoSuchKind")))
+            .RootElement.GetProperty("Summary").GetString()!;
+
+        summary.ShouldContain("nothing to generate");
+    }
 }
