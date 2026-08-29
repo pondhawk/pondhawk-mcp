@@ -130,20 +130,16 @@ public sealed class InitTool
         // </auto-generated>
 
         namespace {{ values.Namespace }};
-
         {%- macro DefaultClass(c) %}
         public partial class {{ c.Name | pascal_case }}
         {%- endmacro %}
-
-        {% dispatch item %}
-        {
-
         {%- macro DefaultProperty(p) %}
             public {{ p.Type | type_nullable: p.IsNullable }} {{ p.Name | pascal_case }} { get; set; }
         {%- endmacro %}
-
+        {% dispatch item %}
+        {
         {%- for p in item.Children %}
-        {% dispatch p %}
+        {%- dispatch p %}
         {%- endfor %}
         }
 
