@@ -9,14 +9,9 @@
 
     <ItemGroup>
         <PackageReference Include="Fluid.Core" />
-        <PackageReference Include="DatabaseSchemaReader" />
         <PackageReference Include="Serilog" />
         <PackageReference Include="Serilog.Sinks.File" />
         <PackageReference Include="Serilog.Extensions.Logging" />
-        <PackageReference Include="Microsoft.Data.SqlClient" />
-        <PackageReference Include="Npgsql" />
-        <PackageReference Include="MySqlConnector" />
-        <PackageReference Include="Microsoft.Data.Sqlite" />
         <PackageReference Include="Humanizer.Core" />
         <PackageReference Include="JsonSchema.Net" />
     </ItemGroup>

@@ -2,188 +2,134 @@ using Pondhawk.Persistence.Core.Configuration;
 
 namespace Pondhawk.Persistence.Core.Models;
 
+/// <summary>
+/// Applies per-artifact overrides to a model tree: selects the variant macro a node renders
+/// with, merges extra metadata onto it, and drops nodes an artifact should not emit.
+///
+/// Overrides address nodes by slash-delimited path ("Orders/Submit/CustomerId"). A '*' segment
+/// matches any single node, '**' matches any run of nodes at any depth. When several overrides
+/// match one node, the one with the most literal segments wins; ties go to the later rule,
+/// so a general rule can be stated first and narrowed afterwards.
+/// </summary>
 public static class OverrideResolver
 {
     /// <summary>
-    /// Applies overrides to models for a specific artifact. Mutates models in place:
-    /// - Sets variant names on Model and Attribute objects
-    /// - Applies DataType overrides to Attribute properties
-    /// - Filters out ignored attributes
+    /// Applies overrides to <paramref name="nodes"/> for one artifact, returning the tree with
+    /// ignored nodes removed. Mutates the nodes it is given — callers pass clones so that
+    /// per-artifact results never leak between templates.
     /// </summary>
-    public static void ApplyOverrides(
-        List<Model> models,
-        string artifactName,
-        List<OverrideConfig> overrides,
-        Dictionary<string, DataTypeConfig> dataTypes)
+    public static List<Node> Apply(List<Node> nodes, string artifactName, List<OverrideConfig> overrides)
     {
-        foreach (var model in models)
-        {
-            // Resolve class-level variant
-            var classVariant = ResolveClassVariant(model.Name, artifactName, overrides);
-            if (!string.IsNullOrEmpty(classVariant))
-                model.SetVariant(artifactName, classVariant);
+        var applicable = overrides
+            .Where(o => string.IsNullOrEmpty(o.Artifact)
+                     || string.Equals(o.Artifact, artifactName, StringComparison.OrdinalIgnoreCase))
+            .ToList();
 
-            // Process attributes
-            var filteredAttributes = new List<Attribute>();
-            foreach (var attr in model.Attributes)
-            {
-                // Check if ignored
-                if (IsIgnored(model.Name, attr.Name, artifactName, overrides))
-                    continue;
-
-                // Resolve property-level variant
-                var propVariant = ResolvePropertyVariant(model.Name, attr.Name, artifactName, overrides);
-                if (!string.IsNullOrEmpty(propVariant))
-                    attr.SetVariant(artifactName, propVariant);
-
-                // Apply DataType from override
-                var dataTypeName = ResolveDataType(model.Name, attr.Name, artifactName, overrides);
-                if (!string.IsNullOrEmpty(dataTypeName) && dataTypes.TryGetValue(dataTypeName, out var dt))
-                    ApplyDataType(attr, dt);
-
-                filteredAttributes.Add(attr);
-            }
-
-            model.Attributes = filteredAttributes;
-        }
+        return applicable.Count == 0 ? nodes : ApplyTo(nodes, "", artifactName, applicable);
     }
 
-    private static string ResolveClassVariant(string className, string artifactName, List<OverrideConfig> overrides)
+    private static List<Node> ApplyTo(List<Node> nodes, string prefix, string artifactName, List<OverrideConfig> overrides)
     {
-        string? result = null;
-        int bestSpecificity = -1;
-        int bestIndex = -1;
+        var kept = new List<Node>();
 
-        for (int i = 0; i < overrides.Count; i++)
+        foreach (var node in nodes)
         {
-            var ovr = overrides[i];
-            if (ovr.Property is not null) continue; // property-level, skip
-            if (string.IsNullOrEmpty(ovr.Variant)) continue;
-            if (!string.IsNullOrEmpty(ovr.Artifact) && !string.Equals(ovr.Artifact, artifactName, StringComparison.OrdinalIgnoreCase)) continue;
+            var path = string.IsNullOrEmpty(prefix) ? node.Name : $"{prefix}/{node.Name}";
+            var matches = Matching(overrides, path);
 
-            var specificity = GetClassSpecificity(ovr.Class, className);
-            if (specificity < 0) continue;
-
-            if (specificity > bestSpecificity || (specificity == bestSpecificity && i > bestIndex))
-            {
-                result = ovr.Variant;
-                bestSpecificity = specificity;
-                bestIndex = i;
-            }
-        }
-
-        return result ?? "";
-    }
-
-    private static string ResolvePropertyVariant(string className, string propertyName, string artifactName, List<OverrideConfig> overrides)
-    {
-        string? result = null;
-        int bestSpecificity = -1;
-        int bestIndex = -1;
-
-        for (int i = 0; i < overrides.Count; i++)
-        {
-            var ovr = overrides[i];
-            if (ovr.Property is null) continue; // class-level, skip
-            if (!string.Equals(ovr.Property, propertyName, StringComparison.OrdinalIgnoreCase)) continue;
-            if (string.IsNullOrEmpty(ovr.Variant)) continue;
-            if (!string.IsNullOrEmpty(ovr.Artifact) && !string.Equals(ovr.Artifact, artifactName, StringComparison.OrdinalIgnoreCase)) continue;
-
-            var specificity = GetClassSpecificity(ovr.Class, className);
-            if (specificity < 0) continue;
-
-            if (specificity > bestSpecificity || (specificity == bestSpecificity && i > bestIndex))
-            {
-                result = ovr.Variant;
-                bestSpecificity = specificity;
-                bestIndex = i;
-            }
-        }
-
-        return result ?? "";
-    }
-
-    private static bool IsIgnored(string className, string propertyName, string artifactName, List<OverrideConfig> overrides)
-    {
-        // Find the most specific Ignore override
-        bool? result = null;
-        int bestSpecificity = -1;
-        int bestIndex = -1;
-
-        for (int i = 0; i < overrides.Count; i++)
-        {
-            var ovr = overrides[i];
-            if (!ovr.Ignore) continue;
-            if (ovr.Property is null) continue; // Ignore only applies to properties
-            if (!string.Equals(ovr.Property, propertyName, StringComparison.OrdinalIgnoreCase)) continue;
-
-            // Artifact scoping: if override has Artifact, it must match
-            if (!string.IsNullOrEmpty(ovr.Artifact) && !string.Equals(ovr.Artifact, artifactName, StringComparison.OrdinalIgnoreCase))
+            if (MostSpecific(matches, o => o.Ignore ? "ignore" : null) is not null)
                 continue;
 
-            // If override has no Artifact, it applies to all artifacts
-            var specificity = GetClassSpecificity(ovr.Class, className);
-            if (specificity < 0) continue;
+            var variant = MostSpecific(matches, o => string.IsNullOrEmpty(o.Variant) ? null : o.Variant);
+            if (variant is not null)
+                node.SetVariant(artifactName, variant);
 
-            if (specificity > bestSpecificity || (specificity == bestSpecificity && i > bestIndex))
-            {
-                result = true;
-                bestSpecificity = specificity;
-                bestIndex = i;
-            }
+            // Least specific first, so a narrower rule's keys land on top of a broader one's.
+            foreach (var (ovr, _) in matches.Where(m => m.Override.Metadata is { Count: > 0 })
+                                            .OrderBy(m => Specificity(m.Override.Path))
+                                            .ThenBy(m => m.Index))
+                foreach (var (key, value) in ovr.Metadata!)
+                    node.Metadata[key] = value;
+
+            node.Children = ApplyTo(node.Children, path, artifactName, overrides);
+            kept.Add(node);
         }
 
-        return result ?? false;
+        return kept;
     }
 
-    private static string? ResolveDataType(string className, string propertyName, string artifactName, List<OverrideConfig> overrides)
+    private static List<(OverrideConfig Override, int Index)> Matching(List<OverrideConfig> overrides, string path)
+    {
+        var segments = path.Split('/');
+        var matches = new List<(OverrideConfig, int)>();
+        for (var i = 0; i < overrides.Count; i++)
+            if (MatchesPath(overrides[i].Path, segments))
+                matches.Add((overrides[i], i));
+        return matches;
+    }
+
+    /// <summary>Picks the value from the most specific matching override; null when none match.</summary>
+    private static string? MostSpecific(
+        List<(OverrideConfig Override, int Index)> matches,
+        Func<OverrideConfig, string?> select)
     {
         string? result = null;
-        int bestSpecificity = -1;
-        int bestIndex = -1;
+        var bestSpecificity = -1;
+        var bestIndex = -1;
 
-        for (int i = 0; i < overrides.Count; i++)
+        foreach (var (ovr, index) in matches)
         {
-            var ovr = overrides[i];
-            if (string.IsNullOrEmpty(ovr.DataType)) continue;
-            if (ovr.Property is not null && !string.Equals(ovr.Property, propertyName, StringComparison.OrdinalIgnoreCase)) continue;
-            if (ovr.Property is null) continue; // DataType only applies to properties
+            var value = select(ovr);
+            if (value is null) continue;
 
-            // Artifact scoping
-            if (!string.IsNullOrEmpty(ovr.Artifact) && !string.Equals(ovr.Artifact, artifactName, StringComparison.OrdinalIgnoreCase))
-                continue;
-
-            var specificity = GetClassSpecificity(ovr.Class, className);
-            if (specificity < 0) continue;
-
-            if (specificity > bestSpecificity || (specificity == bestSpecificity && i > bestIndex))
+            var specificity = Specificity(ovr.Path);
+            if (specificity > bestSpecificity || (specificity == bestSpecificity && index > bestIndex))
             {
-                result = ovr.DataType;
+                result = value;
                 bestSpecificity = specificity;
-                bestIndex = i;
+                bestIndex = index;
             }
         }
 
         return result;
     }
 
-    /// <summary>
-    /// Returns specificity: 1 = exact match, 0 = wildcard, -1 = no match
-    /// </summary>
-    private static int GetClassSpecificity(string pattern, string className)
+    /// <summary>Literal segments in a pattern. More literals means a narrower rule.</summary>
+    private static int Specificity(string pattern)
+        => string.IsNullOrEmpty(pattern)
+            ? 0
+            : pattern.Split('/').Count(s => s != "*" && s != "**");
+
+    public static bool MatchesPath(string pattern, string path)
+        => !string.IsNullOrEmpty(pattern) && MatchesPath(pattern, path.Split('/'));
+
+    private static bool MatchesPath(string pattern, string[] path)
     {
-        if (pattern == "*") return 0;
-        if (string.Equals(pattern, className, StringComparison.OrdinalIgnoreCase)) return 1;
-        return -1;
+        if (string.IsNullOrEmpty(pattern)) return false;
+        return Match(pattern.Split('/'), 0, path, 0);
     }
 
-    public static void ApplyDataType(Attribute attr, DataTypeConfig dt)
+    private static bool Match(string[] pattern, int p, string[] path, int s)
     {
-        if (!string.IsNullOrEmpty(dt.ClrType))
-            attr.ClrType = dt.ClrType;
-        if (dt.MaxLength.HasValue)
-            attr.MaxLength = dt.MaxLength;
-        if (dt.DefaultValue is not null)
-            attr.DefaultValue = dt.DefaultValue;
+        while (true)
+        {
+            if (p == pattern.Length) return s == path.Length;
+
+            if (pattern[p] == "**")
+            {
+                // Absorb zero or more segments; try the shortest match first.
+                for (var skip = s; skip <= path.Length; skip++)
+                    if (Match(pattern, p + 1, path, skip))
+                        return true;
+                return false;
+            }
+
+            if (s == path.Length) return false;
+            if (pattern[p] != "*" && !string.Equals(pattern[p], path[s], StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            p++;
+            s++;
+        }
     }
 }

@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 using Pondhawk.Persistence.Core.Configuration;
 using Serilog;
@@ -7,7 +6,7 @@ using Serilog.Extensions.Logging;
 
 namespace Pondhawk.Persistence.Core.Logging;
 
-public sealed partial class LoggingService : IDisposable
+public sealed class LoggingService : IDisposable
 {
     private Serilog.Core.Logger? _serilogLogger;
     private ILoggerFactory? _loggerFactory;
@@ -17,8 +16,6 @@ public sealed partial class LoggingService : IDisposable
     /// </summary>
     public Serilog.ILogger? SerilogLogger => _serilogLogger;
 
-    [GeneratedRegex(@"(ConnectionString\s*[=:]\s*)([^;""}\s]+[^""}\s]*)", RegexOptions.IgnoreCase)]
-    private static partial Regex ConnectionStringPattern();
 
     /// <summary>
     /// Initializes logging based on the configuration.
@@ -66,27 +63,6 @@ public sealed partial class LoggingService : IDisposable
 
         _loggerFactory = new SerilogLoggerFactory(_serilogLogger);
         return _loggerFactory;
-    }
-
-    /// <summary>
-    /// Redacts connection strings from a message.
-    /// Replaces ConnectionString values with "[REDACTED]".
-    /// </summary>
-    public static string RedactConnectionStrings(string message)
-    {
-        return ConnectionStringPattern().Replace(message, "$1[REDACTED]");
-    }
-
-    /// <summary>
-    /// Redacts connection string value from a ConnectionConfig, returning a safe copy.
-    /// </summary>
-    public static ConnectionConfig RedactConnection(ConnectionConfig connection)
-    {
-        return new ConnectionConfig
-        {
-            Provider = connection.Provider,
-            ConnectionString = "[REDACTED]"
-        };
     }
 
     private static LogEventLevel ParseLevel(string level)

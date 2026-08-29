@@ -133,23 +133,31 @@ public class EnvironmentResolverTests : IDisposable
     }
 
     [Fact]
-    public void ResolveConfiguration_ResolvesConnectionStrings()
+    public void ResolveConfiguration_ResolvesStringValues()
     {
-        var envFile = CreateEnvFile("DB_CONN=Server=localhost;Database=Test;");
+        var envFile = CreateEnvFile("BUILD_STAMP=2026.08.29");
         var resolver = new EnvironmentResolver();
         resolver.LoadEnvFile(envFile);
 
-        var config = new ProjectConfiguration
-        {
-            Connection = new ConnectionConfig
-            {
-                Provider = "sqlserver",
-                ConnectionString = "${DB_CONN}"
-            }
-        };
+        var config = new ProjectConfiguration();
+        config.Values["Stamp"] = "${BUILD_STAMP}";
 
         resolver.ResolveConfiguration(config);
-        config.Connection.ConnectionString.ShouldBe("Server=localhost;Database=Test;");
+        config.Values["Stamp"].ShouldBe("2026.08.29");
+    }
+
+    [Fact]
+    public void ResolveConfiguration_LeavesNonStringValuesAlone()
+    {
+        var resolver = new EnvironmentResolver();
+        var config = new ProjectConfiguration();
+        config.Values["Retries"] = 3L;
+        config.Values["Enabled"] = true;
+
+        resolver.ResolveConfiguration(config);
+
+        config.Values["Retries"].ShouldBe(3L);
+        config.Values["Enabled"].ShouldBe(true);
     }
 
     [Fact]

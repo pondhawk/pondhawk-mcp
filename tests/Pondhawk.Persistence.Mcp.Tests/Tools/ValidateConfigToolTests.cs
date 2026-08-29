@@ -12,8 +12,10 @@ public class ValidateConfigToolTests : IDisposable
 
     public ValidateConfigToolTests()
     {
-        _tempDir = Path.Combine(Path.GetTempPath(), $"pondhawk_vc_{Guid.NewGuid():N}");
+        _tempDir = Path.Combine(Path.GetTempPath(), $"pondhawk_validate_{Guid.NewGuid():N}");
         Directory.CreateDirectory(_tempDir);
+        Directory.CreateDirectory(Path.Combine(_tempDir, "templates"));
+        File.WriteAllText(Path.Combine(_tempDir, "templates", "entity.liquid"), "class {{ item.Name }} {}");
     }
 
     public void Dispose()
@@ -22,37 +24,41 @@ public class ValidateConfigToolTests : IDisposable
             Directory.Delete(_tempDir, true);
     }
 
+    private static ProjectConfiguration ValidConfig() => new()
+    {
+        OutputDir = "src/Generated",
+        Templates = new Dictionary<string, TemplateConfig>
+        {
+            ["entity"] = new()
+            {
+                Path = "templates/entity.liquid",
+                OutputPattern = "{{ item.Name }}.cs",
+                Scope = "PerItem",
+                Mode = "Always"
+            }
+        }
+    };
+
+    private string Validate(ProjectConfiguration config)
+    {
+        ProjectConfigurationLoader.Save(Path.Combine(_tempDir, "pondhawk.project.json"), config);
+        return ValidateConfigTool.Execute(new ServerContext(_tempDir));
+    }
+
+    private void WriteModel(string json) => File.WriteAllText(Path.Combine(_tempDir, "model.json"), json);
+
     [Fact]
     public void ValidateConfig_ValidConfig_ReturnsNoErrors()
     {
-        // Create a valid config with existing template file
-        var templatesDir = Path.Combine(_tempDir, "templates");
-        Directory.CreateDirectory(templatesDir);
-        File.WriteAllText(Path.Combine(templatesDir, "entity.liquid"), "{{ entity.Name }}");
+        var result = Validate(ValidConfig());
 
-        var config = new ProjectConfiguration
-        {
-            Connection = new ConnectionConfig { Provider = "sqlserver", ConnectionString = "Data Source=localhost" },
-            OutputDir = "output",
-            Templates = new Dictionary<string, TemplateConfig>
-            {
-                ["entity"] = new() { Path = "templates/entity.liquid", OutputPattern = "Entities/{{entity.Name}}.cs", Scope = "PerModel", Mode = "Always" }
-            }
-        };
-        ProjectConfigurationLoader.Save(Path.Combine(_tempDir, "persistence.project.json"), config);
-
-        var ctx = new ServerContext(_tempDir);
-        var result = ValidateConfigTool.Execute(ctx);
-        var json = JsonDocument.Parse(result);
-
-        json.RootElement.GetProperty("Valid").GetBoolean().ShouldBeTrue();
+        JsonDocument.Parse(result).RootElement.GetProperty("Valid").GetBoolean().ShouldBeTrue();
     }
 
     [Fact]
     public void ValidateConfig_MissingConfig_ReturnsError()
     {
-        var ctx = new ServerContext(_tempDir);
-        var result = ValidateConfigTool.Execute(ctx);
+        var result = ValidateConfigTool.Execute(new ServerContext(_tempDir));
 
         result.ShouldContain("not found");
     }
@@ -60,103 +66,81 @@ public class ValidateConfigToolTests : IDisposable
     [Fact]
     public void ValidateConfig_MissingTemplateFile_ReportsError()
     {
-        var config = new ProjectConfiguration
-        {
-            Connection = new ConnectionConfig { Provider = "sqlserver", ConnectionString = "Data Source=localhost" },
-            OutputDir = "output",
-            Templates = new Dictionary<string, TemplateConfig>
-            {
-                ["entity"] = new() { Path = "templates/missing.liquid", OutputPattern = "Entities/{{entity.Name}}.cs", Scope = "PerModel", Mode = "Always" }
-            }
-        };
-        ProjectConfigurationLoader.Save(Path.Combine(_tempDir, "persistence.project.json"), config);
+        var config = ValidConfig();
+        config.Templates["entity"].Path = "templates/nope.liquid";
 
-        var ctx = new ServerContext(_tempDir);
-        var result = ValidateConfigTool.Execute(ctx);
-        var json = JsonDocument.Parse(result);
+        var result = Validate(config);
 
-        json.RootElement.GetProperty("Valid").GetBoolean().ShouldBeFalse();
+        JsonDocument.Parse(result).RootElement.GetProperty("Valid").GetBoolean().ShouldBeFalse();
+        result.ShouldContain("File not found");
     }
 
     [Fact]
     public void ValidateConfig_InvalidLoggingLevel_ReportsError()
     {
-        var templatesDir = Path.Combine(_tempDir, "templates");
-        Directory.CreateDirectory(templatesDir);
-        File.WriteAllText(Path.Combine(templatesDir, "entity.liquid"), "{{ entity.Name }}");
+        var config = ValidConfig();
+        config.Logging.Level = "Chatty";
 
-        var config = new ProjectConfiguration
-        {
-            Connection = new ConnectionConfig { Provider = "sqlserver", ConnectionString = "Data Source=localhost" },
-            OutputDir = "output",
-            Templates = new Dictionary<string, TemplateConfig>
-            {
-                ["entity"] = new() { Path = "templates/entity.liquid", OutputPattern = "Entities/{{entity.Name}}.cs", Scope = "PerModel", Mode = "Always" }
-            },
-            Logging = new LoggingConfig { Enabled = true, Level = "InvalidLevel" }
-        };
-        ProjectConfigurationLoader.Save(Path.Combine(_tempDir, "persistence.project.json"), config);
+        var result = Validate(config);
 
-        var ctx = new ServerContext(_tempDir);
-        var result = ValidateConfigTool.Execute(ctx);
-        var json = JsonDocument.Parse(result);
-
-        json.RootElement.GetProperty("Valid").GetBoolean().ShouldBeFalse();
+        JsonDocument.Parse(result).RootElement.GetProperty("Valid").GetBoolean().ShouldBeFalse();
+        result.ShouldContain("Invalid level");
     }
 
     [Fact]
-    public void ValidateConfig_InvalidDataTypeReference_ReportsError()
+    public void ValidateConfig_OverrideNamingUnknownArtifact_ReportsError()
     {
-        var templatesDir = Path.Combine(_tempDir, "templates");
-        Directory.CreateDirectory(templatesDir);
-        File.WriteAllText(Path.Combine(templatesDir, "entity.liquid"), "{{ entity.Name }}");
+        var config = ValidConfig();
+        config.Overrides.Add(new OverrideConfig { Path = "Product/Price", Artifact = "nosuch", Variant = "Currency" });
 
-        var config = new ProjectConfiguration
-        {
-            Connection = new ConnectionConfig { Provider = "sqlserver", ConnectionString = "Data Source=localhost" },
-            OutputDir = "output",
-            Templates = new Dictionary<string, TemplateConfig>
-            {
-                ["entity"] = new() { Path = "templates/entity.liquid", OutputPattern = "Entities/{{entity.Name}}.cs", Scope = "PerModel", Mode = "Always" }
-            },
-            TypeMappings = [new() { DbType = "money", DataType = "NonExistent" }]
-        };
-        ProjectConfigurationLoader.Save(Path.Combine(_tempDir, "persistence.project.json"), config);
+        var result = Validate(config);
 
-        var ctx = new ServerContext(_tempDir);
-        var result = ValidateConfigTool.Execute(ctx);
-        var json = JsonDocument.Parse(result);
+        JsonDocument.Parse(result).RootElement.GetProperty("Valid").GetBoolean().ShouldBeFalse();
+        result.ShouldContain("not a configured template");
+    }
 
-        json.RootElement.GetProperty("Valid").GetBoolean().ShouldBeFalse();
-        result.ShouldContain("NonExistent");
+    [Fact]
+    public void ValidateConfig_OverrideMatchingNoNode_ReportsWarning()
+    {
+        WriteModel("""{ "Nodes": [ { "Name": "Product", "Kind": "Class" } ] }""");
+        var config = ValidConfig();
+        config.Overrides.Add(new OverrideConfig { Path = "Typo/Price", Artifact = "entity", Variant = "Currency" });
+
+        var result = Validate(config);
+        var root = JsonDocument.Parse(result).RootElement;
+
+        root.GetProperty("Valid").GetBoolean().ShouldBeTrue();
+        root.GetProperty("Warnings").GetArrayLength().ShouldBeGreaterThan(0);
+        result.ShouldContain("matches no node");
+    }
+
+    [Fact]
+    public void ValidateConfig_MalformedModel_ReportsError()
+    {
+        WriteModel("{ not json");
+
+        var result = Validate(ValidConfig());
+
+        JsonDocument.Parse(result).RootElement.GetProperty("Valid").GetBoolean().ShouldBeFalse();
+        result.ShouldContain("model.json");
     }
 
     [Fact]
     public void ValidateConfig_OutputPathCollision_ReportsWarning()
     {
-        var templatesDir = Path.Combine(_tempDir, "templates");
-        Directory.CreateDirectory(templatesDir);
-        File.WriteAllText(Path.Combine(templatesDir, "entity1.liquid"), "{{ entity.Name }}");
-        File.WriteAllText(Path.Combine(templatesDir, "entity2.liquid"), "{{ entity.Name }}");
-
-        var config = new ProjectConfiguration
+        File.WriteAllText(Path.Combine(_tempDir, "templates", "other.liquid"), "{{ item.Name }}");
+        var config = ValidConfig();
+        config.Templates["duplicate"] = new TemplateConfig
         {
-            Connection = new ConnectionConfig { Provider = "sqlserver", ConnectionString = "Data Source=localhost" },
-            OutputDir = "output",
-            Templates = new Dictionary<string, TemplateConfig>
-            {
-                ["entity1"] = new() { Path = "templates/entity1.liquid", OutputPattern = "{{entity.Name}}.cs", Scope = "PerModel", Mode = "Always" },
-                ["entity2"] = new() { Path = "templates/entity2.liquid", OutputPattern = "{{entity.Name}}.cs", Scope = "PerModel", Mode = "Always" }
-            }
+            Path = "templates/other.liquid",
+            OutputPattern = "{{ item.Name }}.cs",
+            Scope = "PerItem",
+            Mode = "Always"
         };
-        ProjectConfigurationLoader.Save(Path.Combine(_tempDir, "persistence.project.json"), config);
 
-        var ctx = new ServerContext(_tempDir);
-        var result = ValidateConfigTool.Execute(ctx);
-        var json = JsonDocument.Parse(result);
+        var result = Validate(config);
 
-        var warnings = json.RootElement.GetProperty("Warnings");
-        warnings.GetArrayLength().ShouldBeGreaterThan(0);
+        JsonDocument.Parse(result).RootElement.GetProperty("Warnings").GetArrayLength().ShouldBeGreaterThan(0);
         result.ShouldContain("collision");
     }
 }

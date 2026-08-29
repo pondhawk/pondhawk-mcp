@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Text;
 using System.Text.Json;
 using Pondhawk.Persistence.Core.Configuration;
+using Pondhawk.Persistence.Core.Models;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 
@@ -10,15 +11,15 @@ namespace Pondhawk.Persistence.Mcp.Tools;
 [McpServerToolType]
 public sealed class UpdateTool
 {
-    [McpServerTool(Name = "update"), Description("Updates AGENTS.md and persistence.project.schema.json to the latest version, and normalizes persistence.project.json. Run after upgrading pondhawk-mcp.")]
+    [McpServerTool(Name = "update"), Description("Updates AGENTS.md and the JSON schemas to the latest version, and normalizes pondhawk.project.json. Run after upgrading pondhawk.")]
     public static string Execute(ServerContext ctx)
     {
         var (logger, sw) = ctx.StartToolCall("update");
 
         if (!File.Exists(ctx.ConfigPath))
         {
-            logger.LogError("Tool update failed — persistence.project.json not found");
-            throw new InvalidOperationException("persistence.project.json not found. Run the init tool first to create a project.");
+            logger.LogError("Tool update failed — pondhawk.project.json not found");
+            throw new InvalidOperationException("pondhawk.project.json not found. Run the init tool first to create a project.");
         }
 
         var utf8NoBom = new UTF8Encoding(false);
@@ -29,16 +30,16 @@ public sealed class UpdateTool
         filesUpdated.Add("AGENTS.md");
 
         // Overwrite JSON Schemas with latest version
-        File.WriteAllText(Path.Combine(ctx.ProjectDir, "persistence.project.schema.json"), ProjectConfigurationSchema.SchemaJson, utf8NoBom);
-        filesUpdated.Add("persistence.project.schema.json");
-        File.WriteAllText(Path.Combine(ctx.ProjectDir, "db-design.schema.json"), DbDesignFileSchema.SchemaJson, utf8NoBom);
-        filesUpdated.Add("db-design.schema.json");
+        File.WriteAllText(Path.Combine(ctx.ProjectDir, "pondhawk.project.schema.json"), ProjectConfigurationSchema.SchemaJson, utf8NoBom);
+        filesUpdated.Add("pondhawk.project.schema.json");
+        File.WriteAllText(Path.Combine(ctx.ProjectDir, "model.schema.json"), ModelFileSchema.SchemaJson, utf8NoBom);
+        filesUpdated.Add("model.schema.json");
 
         // Normalize config: load → save (round-trip picks up new defaults, drops unknown fields)
         var config = ctx.EnsureConfig();
         ProjectConfigurationLoader.Save(ctx.ConfigPath, config);
-        ctx.Cache.UpdateConfigTimestampAfterWriteBack(ctx.ConfigPath);
-        filesUpdated.Add("persistence.project.json");
+        ctx.Cache.InvalidateAll();
+        filesUpdated.Add("pondhawk.project.json");
 
         sw.Stop();
         logger.LogInformation("Tool update completed in {Duration}ms — {FileCount} files updated", sw.ElapsedMilliseconds, filesUpdated.Count);

@@ -1,7 +1,6 @@
 using System.ComponentModel;
 using System.Text.Json;
 using Pondhawk.Persistence.Core.Configuration;
-using Pondhawk.Persistence.Core.Introspection;
 using Pondhawk.Persistence.Core.Models;
 using Pondhawk.Persistence.Core.Rendering;
 using Fluid;
@@ -14,53 +13,39 @@ namespace Pondhawk.Persistence.Mcp.Tools;
 [McpServerToolType]
 public sealed class GenerateTool
 {
-    [McpServerTool(Name = "generate"), Description("Generates code by rendering Liquid templates against schema data from db-design.json and writes generated files to disk. Run introspect_schema first to create db-design.json. See AGENTS.md for detailed usage instructions.")]
+    [McpServerTool(Name = "generate"), Description("Generates files by rendering Liquid templates against the nodes in model.json and writes them to disk. See AGENTS.md for detailed usage instructions.")]
     public static string Execute(
         ServerContext ctx,
         [Description("Template keys to run (default: all)")]
         string[]? templates = null,
-        [Description("Exact table/view names to generate for (overrides Include/Exclude)")]
-        string[]? models = null,
-        [Description("Schema filter")]
-        string[]? schemas = null,
-        [Description("Whether to include views")]
-        bool? includeViews = null,
-        [Description("Additional key-value pairs passed to the template context")]
+        [Description("Exact top-level node names to generate for (overrides a template's AppliesTo)")]
+        string[]? items = null,
+        [Description("Additional key-value pairs passed to the template context as {{ parameters.X }}")]
         Dictionary<string, object>? parameters = null)
     {
         var (logger, sw) = ctx.StartToolCall("generate");
         var config = ctx.EnsureConfig();
 
-        // Read schema from db-design.json
-        var schemaModels = ctx.Cache.GetSchema(ctx.SchemaPath);
-        if (schemaModels is null)
+        var model = ctx.Cache.GetModel(ctx.ModelPath);
+        if (model is null)
         {
-            logger.LogError("Tool generate failed — db-design.json not found");
-            throw new InvalidOperationException("db-design.json not found. Run introspect_schema first to introspect the database and create the schema file.");
+            logger.LogError("Tool generate failed — model.json not found");
+            throw new InvalidOperationException(
+                "model.json not found. Write an input model describing the nodes to generate, then run generate again.");
         }
 
-        // Get database/provider metadata from schema file
-        var schemaFile = ctx.Cache.GetSchemaFile(ctx.SchemaPath);
-        var dbName = schemaFile?.Database ?? "";
-        var provider = schemaFile?.Provider ?? config.Connection.Provider;
-
-        // Merge explicit relationships from config with schema data
-        RelationshipMerger.Merge(schemaModels, config.Relationships, config.Defaults.Schema);
-
-        // Filter models if explicit list provided
-        var filteredModels = schemaModels;
-        if (models is { Length: > 0 })
+        var roots = model.Nodes;
+        if (items is { Length: > 0 })
         {
-            var nameSet = new HashSet<string>(models, StringComparer.OrdinalIgnoreCase);
-            filteredModels = schemaModels.Where(m => nameSet.Contains(m.Name)).ToList();
+            var names = new HashSet<string>(items, StringComparer.OrdinalIgnoreCase);
+            roots = roots.Where(n => names.Contains(n.Name)).ToList();
         }
 
-        // Determine which templates to run
         var templateEntries = config.Templates.AsEnumerable();
         if (templates is { Length: > 0 })
         {
-            var templateSet = new HashSet<string>(templates, StringComparer.OrdinalIgnoreCase);
-            templateEntries = templateEntries.Where(t => templateSet.Contains(t.Key));
+            var keys = new HashSet<string>(templates, StringComparer.OrdinalIgnoreCase);
+            templateEntries = templateEntries.Where(t => keys.Contains(t.Key));
         }
 
         var outputDir = Path.IsPathRooted(config.OutputDir)
@@ -88,95 +73,61 @@ public sealed class GenerateTool
             }
 
             var artifactName = templateKey;
+            var matching = roots.Where(n => MatchesAppliesTo(n, templateConfig.AppliesTo)).ToList();
 
-            if (templateConfig.Scope.Equals("PerModel", StringComparison.OrdinalIgnoreCase))
+            if (templateConfig.Scope.Equals("PerItem", StringComparison.OrdinalIgnoreCase))
             {
-                foreach (var entity in filteredModels.Where(m =>
-                    (!m.IsView || (includeViews ?? config.Defaults.IncludeViews))
-                    && MatchesAppliesTo(m.IsView, templateConfig.AppliesTo)))
+                foreach (var node in matching)
                 {
                     try
                     {
-                        // Deep clone model and apply overrides
-                        var modelCopy = CloneModel(entity);
-                        OverrideResolver.ApplyOverrides([modelCopy], artifactName, config.Overrides, config.DataTypes);
+                        // Clone before overrides so per-artifact variants and metadata never
+                        // leak into the next template or survive to the next generate call.
+                        var resolved = OverrideResolver.Apply([node.Clone()], artifactName, config.Overrides);
+                        if (resolved.Count == 0)
+                        {
+                            skipped++;
+                            continue;
+                        }
 
-                        var context = ctx.TemplateEngine.CreateContext();
-                        context.SetValue("entity", FluidValue.Create(modelCopy, context.Options));
-                        context.SetValue("schema", FluidValue.Create(new { Name = modelCopy.Schema }, context.Options));
-                        context.SetValue("database", FluidValue.Create(new { Database = dbName, Provider = provider }, context.Options));
-                        context.SetValue("config", FluidValue.Create(config, context.Options));
-                        if (parameters is not null)
-                            context.SetValue("parameters", FluidValue.Create(parameters, context.Options));
-                        context.AmbientValues["ArtifactName"] = artifactName;
+                        var context = CreateContext(ctx, config, model, parameters, artifactName);
+                        context.SetValue("item", FluidValue.Create(resolved[0], context.Options));
 
                         var content = ctx.TemplateEngine.Render(compiledTemplate, context);
+                        var outputFileName = ResolveOutputPattern(ctx, templateConfig.OutputPattern, resolved[0]);
+                        var result = FileWriter.WriteFile(Path.Combine(outputDir, outputFileName), content, templateConfig.Mode);
 
-                        // Resolve output path
-                        var outputFileName = ResolveOutputPattern(ctx, templateConfig.OutputPattern, modelCopy);
-                        var fullPath = Path.Combine(outputDir, outputFileName);
-
-                        var result = FileWriter.WriteFile(fullPath, content, templateConfig.Mode);
                         filesWritten.Add(new { Path = Path.GetRelativePath(outputDir, result.Path), result.Action });
-
-                        switch (result.Action)
-                        {
-                            case "Created": created++; break;
-                            case "Overwritten": overwritten++; break;
-                            case "SkippedExisting": skipped++; break;
-                            case "SkippedEmpty": skipped++; break;
-                        }
+                        Tally(result.Action, ref created, ref overwritten, ref skipped);
                     }
                     catch (Exception ex)
                     {
-                        logger.LogError(ex, "Tool generate — failed to render template '{TemplateKey}' for model '{ModelName}'", templateKey, entity.Name);
-                        filesWritten.Add(new { Path = $"{templateKey}/{entity.Name}", Action = "Failed", Error = ex.Message });
+                        logger.LogError(ex, "Tool generate — failed to render template '{TemplateKey}' for node '{NodeName}'", templateKey, node.Name);
+                        filesWritten.Add(new { Path = $"{templateKey}/{node.Name}", Action = "Failed", Error = ex.Message });
                         failed++;
                     }
                 }
             }
-            else // SingleFile
+            else // Single
             {
                 try
                 {
-                    var tables = filteredModels.Where(m => !m.IsView && MatchesAppliesTo(false, templateConfig.AppliesTo)).ToList();
-                    var views = filteredModels.Where(m => m.IsView && MatchesAppliesTo(true, templateConfig.AppliesTo)).ToList();
+                    var resolved = OverrideResolver.Apply(
+                        matching.Select(n => n.Clone()).ToList(), artifactName, config.Overrides);
 
-                    // Apply overrides to copies
-                    var tablesCopy = tables.Select(CloneModel).ToList();
-                    var viewsCopy = views.Select(CloneModel).ToList();
-                    OverrideResolver.ApplyOverrides(tablesCopy, artifactName, config.Overrides, config.DataTypes);
-                    OverrideResolver.ApplyOverrides(viewsCopy, artifactName, config.Overrides, config.DataTypes);
-
-                    var context = ctx.TemplateEngine.CreateContext();
-                    context.SetValue("entities", FluidValue.Create(tablesCopy, context.Options));
-                    context.SetValue("views", FluidValue.Create(viewsCopy, context.Options));
-                    context.SetValue("schemas", FluidValue.Create(
-                        filteredModels.Select(m => m.Schema).Distinct().Select(s => new { Name = s }).ToList(),
-                        context.Options));
-                    context.SetValue("database", FluidValue.Create(new { Database = dbName, Provider = provider }, context.Options));
-                    context.SetValue("config", FluidValue.Create(config, context.Options));
-                    if (parameters is not null)
-                        context.SetValue("parameters", FluidValue.Create(parameters, context.Options));
-                    context.AmbientValues["ArtifactName"] = artifactName;
+                    var context = CreateContext(ctx, config, model, parameters, artifactName);
+                    context.SetValue("items", FluidValue.Create(resolved, context.Options));
 
                     var content = ctx.TemplateEngine.Render(compiledTemplate, context);
                     var outputFileName = ResolveOutputPattern(ctx, templateConfig.OutputPattern, null);
-                    var fullPath = Path.Combine(outputDir, outputFileName);
+                    var result = FileWriter.WriteFile(Path.Combine(outputDir, outputFileName), content, templateConfig.Mode);
 
-                    var result = FileWriter.WriteFile(fullPath, content, templateConfig.Mode);
                     filesWritten.Add(new { Path = Path.GetRelativePath(outputDir, result.Path), result.Action });
-
-                    switch (result.Action)
-                    {
-                        case "Created": created++; break;
-                        case "Overwritten": overwritten++; break;
-                        case "SkippedExisting": skipped++; break;
-                    }
+                    Tally(result.Action, ref created, ref overwritten, ref skipped);
                 }
                 catch (Exception ex)
                 {
-                    logger.LogError(ex, "Tool generate — failed to render SingleFile template '{TemplateKey}'", templateKey);
+                    logger.LogError(ex, "Tool generate — failed to render Single-scope template '{TemplateKey}'", templateKey);
                     filesWritten.Add(new { Path = templateKey, Action = "Failed", Error = ex.Message });
                     failed++;
                 }
@@ -202,57 +153,52 @@ public sealed class GenerateTool
         }, new JsonSerializerOptions { WriteIndented = true });
     }
 
-    private static string ResolveOutputPattern(ServerContext ctx, string pattern, Model? entity)
+    private static TemplateContext CreateContext(
+        ServerContext ctx,
+        ProjectConfiguration config,
+        ModelFile model,
+        Dictionary<string, object>? parameters,
+        string artifactName)
     {
-        // Use the template engine to resolve the output pattern
+        var context = ctx.TemplateEngine.CreateContext();
+        context.SetValue("model", FluidValue.Create(model, context.Options));
+        context.SetValue("values", FluidValue.Create(config.Values, context.Options));
+        context.SetValue("config", FluidValue.Create(config, context.Options));
+        if (parameters is not null)
+            context.SetValue("parameters", FluidValue.Create(parameters, context.Options));
+        context.AmbientValues["ArtifactName"] = artifactName;
+        return context;
+    }
+
+    private static void Tally(string action, ref int created, ref int overwritten, ref int skipped)
+    {
+        switch (action)
+        {
+            case "Created": created++; break;
+            case "Overwritten": overwritten++; break;
+            case "SkippedExisting":
+            case "SkippedEmpty": skipped++; break;
+        }
+    }
+
+    private static string ResolveOutputPattern(ServerContext ctx, string pattern, Node? item)
+    {
         if (!ctx.TemplateEngine.TryParse(pattern, out var tmpl, out _))
             return pattern;
 
         var renderCtx = ctx.TemplateEngine.CreateContext();
-        if (entity is not null)
-            renderCtx.SetValue("entity", FluidValue.Create(entity, renderCtx.Options));
+        if (item is not null)
+            renderCtx.SetValue("item", FluidValue.Create(item, renderCtx.Options));
 
         return ctx.TemplateEngine.Render(tmpl, renderCtx).Trim();
     }
 
-    private static bool MatchesAppliesTo(bool isView, string? appliesTo)
-    {
-        if (string.IsNullOrEmpty(appliesTo) || appliesTo.Equals("All", StringComparison.OrdinalIgnoreCase))
-            return true;
-        if (appliesTo.Equals("Tables", StringComparison.OrdinalIgnoreCase))
-            return !isView;
-        if (appliesTo.Equals("Views", StringComparison.OrdinalIgnoreCase))
-            return isView;
-        return true; // Unknown value — treat as All
-    }
-
-    private static Model CloneModel(Model source)
-    {
-        var clone = new Model
-        {
-            Name = source.Name,
-            Schema = source.Schema,
-            IsView = source.IsView,
-            Note = source.Note,
-            PrimaryKey = source.PrimaryKey,
-            ForeignKeys = source.ForeignKeys.ToList(),
-            ReferencingForeignKeys = source.ReferencingForeignKeys.ToList(),
-            Indexes = source.Indexes.ToList()
-        };
-        clone.Attributes = source.Attributes.Select(a => new Pondhawk.Persistence.Core.Models.Attribute
-        {
-            Name = a.Name,
-            DataType = a.DataType,
-            ClrType = a.ClrType,
-            IsNullable = a.IsNullable,
-            IsPrimaryKey = a.IsPrimaryKey,
-            IsIdentity = a.IsIdentity,
-            MaxLength = a.MaxLength,
-            Precision = a.Precision,
-            Scale = a.Scale,
-            DefaultValue = a.DefaultValue,
-            Note = a.Note
-        }).ToList();
-        return clone;
-    }
+    /// <summary>
+    /// A template with no AppliesTo, or "All", renders every top-level node; otherwise it is
+    /// restricted to nodes of that Kind.
+    /// </summary>
+    private static bool MatchesAppliesTo(Node node, string? appliesTo)
+        => string.IsNullOrEmpty(appliesTo)
+           || appliesTo.Equals("All", StringComparison.OrdinalIgnoreCase)
+           || appliesTo.Equals(node.Kind, StringComparison.OrdinalIgnoreCase);
 }

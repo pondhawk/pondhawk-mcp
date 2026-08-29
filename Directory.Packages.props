@@ -7,18 +7,10 @@
         <!-- Template Engine -->
         <PackageVersion Include="Fluid.Core" Version="2.31.0" />
 
-        <!-- Database -->
-        <PackageVersion Include="DatabaseSchemaReader" Version="2.18.0" />
-        <PackageVersion Include="Microsoft.Data.SqlClient" Version="6.1.4" />
-        <PackageVersion Include="Npgsql" Version="10.0.1" />
-        <PackageVersion Include="MySqlConnector" Version="2.5.0" />
-        <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.2" />
-
         <!-- Logging -->
         <PackageVersion Include="Serilog" Version="4.3.0" />
         <PackageVersion Include="Serilog.Sinks.File" Version="7.0.0" />
         <PackageVersion Include="Serilog.Extensions.Logging" Version="10.0.0" />
-
 
         <!-- JSON Schema Validation -->
         <PackageVersion Include="JsonSchema.Net" Version="9.0.0" />

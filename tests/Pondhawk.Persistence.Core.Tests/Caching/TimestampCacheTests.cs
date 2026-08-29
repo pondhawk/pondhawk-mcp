@@ -1,6 +1,5 @@
 using Pondhawk.Persistence.Core.Caching;
 using Pondhawk.Persistence.Core.Configuration;
-using Pondhawk.Persistence.Core.Introspection;
 using Pondhawk.Persistence.Core.Models;
 using Pondhawk.Persistence.Core.Rendering;
 using Shouldly;
@@ -26,22 +25,33 @@ public class TimestampCacheTests : IDisposable
             Directory.Delete(_tempDir, true);
     }
 
-    private string SchemaPath => Path.Combine(_tempDir, "schema.json");
+    private string ModelPath => Path.Combine(_tempDir, "model.json");
 
     private string WriteConfigFile(string? json = null)
     {
         json ??= """
             {
-                "Connection": {},
                 "OutputDir": "generated",
-                "Templates": {},
-                "Defaults": { "Schema": "dbo" }
+                "Templates": {}
             }
             """;
-        var path = Path.Combine(_tempDir, "persistence.project.json");
+        var path = Path.Combine(_tempDir, "pondhawk.project.json");
         File.WriteAllText(path, json);
         return path;
     }
+
+    private static ModelFile SampleModel() => new()
+    {
+        Name = "Sample",
+        Nodes =
+        [
+            new Node
+            {
+                Name = "Products", Kind = "Class",
+                Children = [new Node { Name = "Id", Kind = "Property" }]
+            }
+        ]
+    };
 
     private string WriteTemplateFile(string name, string content)
     {
@@ -83,10 +93,8 @@ public class TimestampCacheTests : IDisposable
         Thread.Sleep(50); // Ensure different timestamp
         File.WriteAllText(configPath, """
             {
-                "Connection": {},
                 "OutputDir": "updated",
-                "Templates": {},
-                "Defaults": { "Schema": "dbo" }
+                "Templates": {}
             }
             """);
 
@@ -107,21 +115,19 @@ public class TimestampCacheTests : IDisposable
         _cache.GetTemplate(templatePath);
 
         // Write a schema file and capture the cached instance
-        _cache.SetSchema([new Model { Name = "Products" }], SchemaPath, "TestDb", "sqlite");
-        var schemaBefore = _cache.GetSchema(SchemaPath);
+        _cache.SetModel(SampleModel(), ModelPath);
+        var modelBefore = _cache.GetModel(ModelPath);
 
         // Verify they are cached
-        _cache.HasSchema(SchemaPath).ShouldBeTrue();
+        _cache.HasModel(ModelPath).ShouldBeTrue();
         _cache.IsTemplateStale(templatePath).ShouldBeFalse();
 
         // Modify config file
         Thread.Sleep(50);
         File.WriteAllText(configPath, """
             {
-                "Connection": {},
                 "OutputDir": "changed",
-                "Templates": {},
-                "Defaults": { "Schema": "dbo" }
+                "Templates": {}
             }
             """);
 
@@ -129,13 +135,13 @@ public class TimestampCacheTests : IDisposable
         _cache.GetConfiguration(configPath);
 
         // Schema file should still exist on disk
-        _cache.HasSchema(SchemaPath).ShouldBeTrue();
+        _cache.HasModel(ModelPath).ShouldBeTrue();
         // Template cache should be invalidated
         _cache.IsTemplateStale(templatePath).ShouldBeTrue();
         // Schema cache should be invalidated — next GetSchema returns fresh objects
-        var schemaAfter = _cache.GetSchema(SchemaPath);
-        schemaAfter.ShouldNotBeNull();
-        ReferenceEquals(schemaBefore, schemaAfter).ShouldBeFalse();
+        var modelAfter = _cache.GetModel(ModelPath);
+        modelAfter.ShouldNotBeNull();
+        ReferenceEquals(modelBefore, modelAfter).ShouldBeFalse();
     }
 
     [Fact]
@@ -205,80 +211,33 @@ public class TimestampCacheTests : IDisposable
     }
 
     [Fact]
-    public void GetSchema_ReturnsNull_WhenNoSchemaFile()
+    public void GetModel_ReturnsNull_WhenNoModelFile()
     {
-        _cache.GetSchema(SchemaPath).ShouldBeNull();
+        _cache.GetModel(ModelPath).ShouldBeNull();
     }
 
     [Fact]
-    public void GetSchema_ReturnsCached_AfterSet()
+    public void GetModel_ReturnsCached_AfterSet()
     {
-        var models = new List<Model> { new() { Name = "Products", Schema = "main" } };
-        _cache.SetSchema(models, SchemaPath, "TestDb", "sqlite");
+        var model = SampleModel();
+        _cache.SetModel(model, ModelPath);
 
-        var cached = _cache.GetSchema(SchemaPath);
+        var cached = _cache.GetModel(ModelPath);
         cached.ShouldNotBeNull();
-        cached.Count.ShouldBe(1);
-        cached[0].Name.ShouldBe("Products");
+        cached.Nodes.Count.ShouldBe(1);
+        cached.Nodes[0].Name.ShouldBe("Products");
     }
 
     [Fact]
-    public void SetSchema_WritesSchemaJsonToDisk()
+    public void SetModel_WritesModelJsonToDisk()
     {
-        var models = new List<Model> { new() { Name = "Products", Schema = "main" } };
-        _cache.SetSchema(models, SchemaPath, "TestDb", "sqlite");
+        var model = SampleModel();
+        _cache.SetModel(model, ModelPath);
 
-        File.Exists(SchemaPath).ShouldBeTrue();
-        var json = File.ReadAllText(SchemaPath);
+        File.Exists(ModelPath).ShouldBeTrue();
+        var json = File.ReadAllText(ModelPath);
         json.ShouldContain("Products");
-        json.ShouldContain("TestDb");
-        json.ShouldContain("sqlite");
-    }
-
-    [Fact]
-    public void GetSchemaFile_ReturnsMetadata()
-    {
-        var models = new List<Model> { new() { Name = "Products", Schema = "main" } };
-        _cache.SetSchema(models, SchemaPath, "TestDb", "sqlite");
-
-        var schemaFile = _cache.GetSchemaFile(SchemaPath);
-        schemaFile.ShouldNotBeNull();
-        schemaFile.Database.ShouldBe("TestDb");
-        schemaFile.Provider.ShouldBe("sqlite");
-    }
-
-    [Fact]
-    public void UpdateConfigTimestampAfterWriteBack_DoesNotInvalidateSchema()
-    {
-        var configPath = WriteConfigFile();
-
-        // Prime the caches
-        _cache.GetConfiguration(configPath);
-        _cache.SetSchema([new Model { Name = "Products", Schema = "main" }], SchemaPath, "TestDb", "sqlite");
-
-        // Simulate TypeMappings write-back modifying the config file
-        Thread.Sleep(50);
-        File.WriteAllText(configPath, """
-            {
-                "Connection": {},
-                "OutputDir": "generated",
-                "Templates": {},
-                "Defaults": { "Schema": "dbo" },
-                "TypeMappings": [{ "DbType": "int", "ClrType": "int" }]
-            }
-            """);
-
-        // Update config timestamp without invalidating schema
-        _cache.UpdateConfigTimestampAfterWriteBack(configPath);
-
-        // Schema should still be cached
-        _cache.HasSchema(SchemaPath).ShouldBeTrue();
-        var cached = _cache.GetSchema(SchemaPath);
-        cached.ShouldNotBeNull();
-        cached[0].Name.ShouldBe("Products");
-
-        // Config should reflect the new content
-        _cache.GetConfiguration(configPath).TypeMappings.Count.ShouldBe(1);
+        json.ShouldContain("Class");
     }
 
     [Fact]

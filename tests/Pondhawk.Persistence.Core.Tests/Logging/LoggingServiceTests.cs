@@ -174,41 +174,6 @@ public class LoggingServiceTests : IDisposable
     }
 
     [Fact]
-    public void RedactConnectionStrings_RedactsValues()
-    {
-        var message = "Connecting with ConnectionString=Server=localhost;Database=mydb;User=admin;Password=secret123";
-        var redacted = LoggingService.RedactConnectionStrings(message);
-
-        redacted.ShouldContain("[REDACTED]");
-        redacted.ShouldNotContain("secret123");
-        redacted.ShouldNotContain("localhost");
-    }
-
-    [Fact]
-    public void RedactConnectionStrings_NoConnectionString_ReturnsUnchanged()
-    {
-        var message = "Normal log message with no credentials";
-        var redacted = LoggingService.RedactConnectionStrings(message);
-
-        redacted.ShouldBe(message);
-    }
-
-    [Fact]
-    public void RedactConnection_ReplacesConnectionString()
-    {
-        var connection = new ConnectionConfig
-        {
-            Provider = "sqlserver",
-            ConnectionString = "Server=prod;Password=secret"
-        };
-
-        var redacted = LoggingService.RedactConnection(connection);
-
-        redacted.ConnectionString.ShouldBe("[REDACTED]");
-        redacted.Provider.ShouldBe("sqlserver");
-    }
-
-    [Fact]
     public void RollingInterval_Day_ProducesDateNamedFiles()
     {
         var logPath = Path.Combine(_tempDir, "rolling.log");

@@ -3,7 +3,6 @@ using Pondhawk.Persistence.Core.Models;
 using Pondhawk.Persistence.Core.Rendering;
 using Fluid.Values;
 using Shouldly;
-using Attribute = Pondhawk.Persistence.Core.Models.Attribute;
 
 namespace Pondhawk.Persistence.Core.Tests.Rendering;
 
@@ -12,17 +11,15 @@ public class TemplateRenderingTests
     private readonly TemplateEngine _engine = new();
 
     [Fact]
-    public void PerModel_RendersWithEntityContext()
+    public void PerItem_RendersWithItemAndValues()
     {
-        var source = "namespace {{ config.Defaults.Namespace }};class {{ entity.Name }}{}";
+        var source = "namespace {{ values.Namespace }};class {{ item.Name }}{}";
         _engine.TryParse(source, out var template, out _).ShouldBeTrue();
 
         var ctx = _engine.CreateContext();
-        ctx.SetValue("entity", FluidValue.Create(new Model { Name = "Products", Schema = "dbo" }, ctx.Options));
-        ctx.SetValue("config", FluidValue.Create(new ProjectConfiguration
-        {
-            Defaults = new DefaultsConfig { Namespace = "MyApp.Data" }
-        }, ctx.Options));
+        ctx.SetValue("item", FluidValue.Create(new Node { Name = "Products", Kind = "Class" }, ctx.Options));
+        ctx.SetValue("values", FluidValue.Create(
+            new Dictionary<string, object?> { ["Namespace"] = "MyApp.Data" }, ctx.Options));
 
         var result = _engine.Render(template, ctx);
         result.ShouldContain("MyApp.Data");
@@ -30,153 +27,104 @@ public class TemplateRenderingTests
     }
 
     [Fact]
-    public void SingleFile_RendersWithEntitiesContext()
+    public void Single_RendersWithItemsCollection()
     {
-        var source = "{% for e in entities %}{{ e.Name }},{% endfor %}";
-        _engine.TryParse(source, out var template, out _).ShouldBeTrue();
+        _engine.TryParse("{% for i in items %}{{ i.Name }},{% endfor %}", out var template, out _).ShouldBeTrue();
 
         var ctx = _engine.CreateContext();
-        ctx.SetValue("entities", FluidValue.Create(new List<Model>
+        ctx.SetValue("items", FluidValue.Create(new List<Node>
         {
-            new() { Name = "Products" },
-            new() { Name = "Categories" }
+            new() { Name = "Products", Kind = "Class" },
+            new() { Name = "Categories", Kind = "Class" }
         }, ctx.Options));
 
         var result = _engine.Render(template, ctx).Trim();
-        result.ShouldContain("Products");
-        result.ShouldContain("Categories");
+        result.ShouldBe("Products,Categories,");
     }
 
     [Fact]
-    public void DatabaseContext_Available()
+    public void Metadata_IsReachableAsADirectMember()
     {
-        var source = "{{ database.Database }}-{{ database.Provider }}";
-        _engine.TryParse(source, out var template, out _).ShouldBeTrue();
+        // The point of the dynamic accessor: templates read model metadata without the
+        // engine knowing the model's shape, and without a Metadata. prefix.
+        var node = new Node { Name = "Price", Kind = "Property" };
+        node.Metadata["Type"] = "decimal";
+        node.Metadata["IsNullable"] = true;
 
+        _engine.TryParse("{{ item.Type | type_nullable: item.IsNullable }}", out var template, out _).ShouldBeTrue();
         var ctx = _engine.CreateContext();
-        ctx.SetValue("database", FluidValue.Create(new { Database = "Inventory", Provider = "sqlserver" }, ctx.Options));
+        ctx.SetValue("item", FluidValue.Create(node, ctx.Options));
 
-        var result = _engine.Render(template, ctx).Trim();
-        result.ShouldBe("Inventory-sqlserver");
+        _engine.Render(template, ctx).Trim().ShouldBe("decimal?");
     }
 
     [Fact]
-    public void Parameters_PassThrough()
+    public void Metadata_AbsentKeyRendersEmptyRatherThanThrowing()
     {
-        var source = "{{ parameters.custom_flag }}";
-        _engine.TryParse(source, out var template, out _).ShouldBeTrue();
-
+        _engine.TryParse("[{{ item.NoSuchKey }}]", out var template, out _).ShouldBeTrue();
         var ctx = _engine.CreateContext();
-        ctx.SetValue("parameters", FluidValue.Create(new Dictionary<string, object> { ["custom_flag"] = "yes" }, ctx.Options));
+        ctx.SetValue("item", FluidValue.Create(new Node { Name = "Id", Kind = "Property" }, ctx.Options));
 
-        var result = _engine.Render(template, ctx).Trim();
-        result.ShouldBe("yes");
+        _engine.Render(template, ctx).Trim().ShouldBe("[]");
     }
 
     [Fact]
-    public void CompleteEntityTemplate_ProducesValidOutput()
+    public void Metadata_AbsentKeyIsFalsyForConditionals()
     {
-        var source = """
-            namespace {{ config.Defaults.Namespace }}.Entities;
-
-            {%- macro DefaultClass(m) %}
-            public partial class {{ m.Name | pascal_case }}
-            {%- endmacro %}
-
-            {% dispatch entity %}
-            {
-
-            {%- macro DefaultProperty(a) %}
-                public {{ a.ClrType | type_nullable: a.IsNullable }} {{ a.Name | pascal_case }} { get; set; }
-            {%- endmacro %}
-
-            {%- for a in entity.Attributes %}
-            {% dispatch a %}
-            {%- endfor %}
-            }
-            """;
-
-        _engine.TryParse(source, out var template, out _).ShouldBeTrue();
-
-        var model = new Model { Name = "Products", Schema = "dbo" };
-        model.Attributes.Add(new Attribute { Name = "Id", ClrType = "int", IsNullable = false });
-        model.Attributes.Add(new Attribute { Name = "Name", ClrType = "string", IsNullable = false });
-        model.Attributes.Add(new Attribute { Name = "Price", ClrType = "decimal", IsNullable = true });
-
+        _engine.TryParse("{% if item.IsKey %}KEY{% else %}NOT{% endif %}", out var template, out _).ShouldBeTrue();
         var ctx = _engine.CreateContext();
-        ctx.SetValue("entity", FluidValue.Create(model, ctx.Options));
-        ctx.SetValue("config", FluidValue.Create(new ProjectConfiguration
-        {
-            Defaults = new DefaultsConfig { Namespace = "MyApp.Data" }
-        }, ctx.Options));
-        ctx.AmbientValues["ArtifactName"] = "entity";
+        ctx.SetValue("item", FluidValue.Create(new Node { Name = "Name", Kind = "Property" }, ctx.Options));
 
-        var result = _engine.Render(template, ctx);
-        result.ShouldContain("namespace MyApp.Data.Entities;");
-        result.ShouldContain("public partial class Products");
-        result.ShouldContain("public int Id { get; set; }");
-        result.ShouldContain("public string Name { get; set; }");
-        result.ShouldContain("public decimal? Price { get; set; }");
+        _engine.Render(template, ctx).Trim().ShouldBe("NOT");
     }
 
     [Fact]
-    public void TryParse_InvalidTemplate_ReturnsFalse()
+    public void Model_RootIsAvailable()
     {
-        var success = _engine.TryParse("{% if %}", out _, out var error);
-        success.ShouldBeFalse();
-        error.ShouldNotBeNullOrEmpty();
-    }
+        var model = ModelFileLoader.Deserialize("""
+            { "Name": "Catalog", "Version": "2.1", "Nodes": [] }
+            """);
 
-    [Fact]
-    public void SingleFile_AccessesViewsAndSchemas()
-    {
-        var source = "{% for s in schemas %}{{ s.Name }}:{% for t in s.Tables %}{{ t.Name }},{% endfor %}{% endfor %}";
-        _engine.TryParse(source, out var template, out _).ShouldBeTrue();
-
+        _engine.TryParse("{{ model.Name }}-{{ model.Version }}", out var template, out _).ShouldBeTrue();
         var ctx = _engine.CreateContext();
-        ctx.SetValue("schemas", FluidValue.Create(new[]
-        {
-            new { Name = "dbo", Tables = new[] { new { Name = "Products" }, new { Name = "Orders" } } }
-        }, ctx.Options));
+        ctx.SetValue("model", FluidValue.Create(model, ctx.Options));
 
-        var result = _engine.Render(template, ctx).Trim();
-        result.ShouldContain("dbo");
-        result.ShouldContain("Products");
-        result.ShouldContain("Orders");
+        _engine.Render(template, ctx).Trim().ShouldBe("Catalog-2.1");
     }
 
     [Fact]
-    public void ValidateFilterNames_KnownFilters_ReturnsEmpty()
+    public void Config_IsAvailable()
     {
-        var source = "{{ entity.Name | pascal_case }} {{ x | camel_case }} {{ y | type_nullable: true }}";
-        var unknown = TemplateEngine.ValidateFilterNames(source);
-        unknown.ShouldBeEmpty();
-    }
-
-    [Fact]
-    public void ValidateFilterNames_UnknownFilter_ReturnsFilterName()
-    {
-        var source = "{{ entity.Name | bogus_filter }}";
-        var unknown = TemplateEngine.ValidateFilterNames(source);
-        unknown.Count.ShouldBe(1);
-        unknown[0].ShouldBe("bogus_filter");
-    }
-
-    [Fact]
-    public void ValidateFilterNames_DuplicateUnknown_Deduplicated()
-    {
-        var source = "{{ a | bad }} {{ b | bad }}";
-        var unknown = TemplateEngine.ValidateFilterNames(source);
-        unknown.Count.ShouldBe(1);
-    }
-
-    [Fact]
-    public void StrictVariables_UndefinedVariable_Throws()
-    {
-        var source = "{{ missing_var }}";
-        _engine.TryParse(source, out var template, out _).ShouldBeTrue();
-
+        _engine.TryParse("{{ config.OutputDir }}", out var template, out _).ShouldBeTrue();
         var ctx = _engine.CreateContext();
+        ctx.SetValue("config", FluidValue.Create(
+            new ProjectConfiguration { OutputDir = "src/Generated" }, ctx.Options));
+
+        _engine.Render(template, ctx).Trim().ShouldBe("src/Generated");
+    }
+
+    [Fact]
+    public void UndefinedVariable_Throws()
+    {
+        _engine.TryParse("{{ nosuchvariable.Name }}", out var template, out _).ShouldBeTrue();
+        var ctx = _engine.CreateContext();
+
         Should.Throw<InvalidOperationException>(() => _engine.Render(template, ctx));
+    }
+
+    [Fact]
+    public void ChildrenCollection_Iterates()
+    {
+        var node = new Node
+        {
+            Name = "Product", Kind = "Class",
+            Children = [new Node { Name = "Id", Kind = "Property" }, new Node { Name = "Price", Kind = "Property" }]
+        };
+
+        _engine.TryParse("{% for c in item.Children %}{{ c.Name }};{% endfor %}", out var template, out _).ShouldBeTrue();
+        var ctx = _engine.CreateContext();
+        ctx.SetValue("item", FluidValue.Create(node, ctx.Options));
+
+        _engine.Render(template, ctx).Trim().ShouldBe("Id;Price;");
     }
 }

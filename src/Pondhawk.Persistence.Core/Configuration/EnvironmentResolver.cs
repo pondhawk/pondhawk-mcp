@@ -73,10 +73,11 @@ public sealed partial class EnvironmentResolver
 
     public void ResolveConfiguration(ProjectConfiguration config)
     {
-        // Only connection strings support ${VAR} substitution.
-        // The .env file exists solely to keep database credentials out of version control.
-        // All other configuration belongs directly in persistence.project.json.
-        config.Connection.ConnectionString = Resolve(config.Connection.ConnectionString);
+        // Only string entries under Values support ${VAR} substitution, so anything a template
+        // needs but should not be committed — a licence key, a build stamp — can come from .env.
+        foreach (var key in config.Values.Keys.ToList())
+            if (config.Values[key] is string value)
+                config.Values[key] = Resolve(value);
     }
 }
 

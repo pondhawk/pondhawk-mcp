@@ -1,4 +1,7 @@
 using System.Text.Json;
+using Pondhawk.Persistence.Core.Configuration;
+using Pondhawk.Persistence.Core.Models;
+using Pondhawk.Persistence.Core.Rendering;
 using Pondhawk.Persistence.Mcp;
 using Pondhawk.Persistence.Mcp.Tools;
 using Shouldly;
@@ -21,103 +24,129 @@ public class InitToolTests : IDisposable
             Directory.Delete(_tempDir, true);
     }
 
+    private string Path_(params string[] parts)
+        => System.IO.Path.Combine([_tempDir, .. parts]);
+
     [Fact]
     public void Init_CreatesAllExpectedFiles()
     {
-        var ctx = new ServerContext(_tempDir);
-        var result = InitTool.Execute(ctx);
+        var result = InitTool.Execute(new ServerContext(_tempDir));
         var json = JsonDocument.Parse(result);
 
-        json.RootElement.GetProperty("FilesCreated").GetArrayLength().ShouldBe(7);
-        File.Exists(Path.Combine(_tempDir, "persistence.project.json")).ShouldBeTrue();
-        File.Exists(Path.Combine(_tempDir, "persistence.project.schema.json")).ShouldBeTrue();
-        File.Exists(Path.Combine(_tempDir, "db-design.schema.json")).ShouldBeTrue();
-        File.Exists(Path.Combine(_tempDir, "AGENTS.md")).ShouldBeTrue();
-        File.Exists(Path.Combine(_tempDir, ".env")).ShouldBeTrue();
-        File.Exists(Path.Combine(_tempDir, "templates", "entity.generated.liquid")).ShouldBeTrue();
-        File.Exists(Path.Combine(_tempDir, "templates", "entity.stub.liquid")).ShouldBeTrue();
+        json.RootElement.GetProperty("FilesCreated").GetArrayLength().ShouldBe(8);
+        File.Exists(Path_("pondhawk.project.json")).ShouldBeTrue();
+        File.Exists(Path_("pondhawk.project.schema.json")).ShouldBeTrue();
+        File.Exists(Path_("model.json")).ShouldBeTrue();
+        File.Exists(Path_("model.schema.json")).ShouldBeTrue();
+        File.Exists(Path_("AGENTS.md")).ShouldBeTrue();
+        File.Exists(Path_(".env")).ShouldBeTrue();
+        File.Exists(Path_("templates", "entity.generated.liquid")).ShouldBeTrue();
+        File.Exists(Path_("templates", "entity.stub.liquid")).ShouldBeTrue();
     }
 
     [Fact]
     public void Init_ThrowsError_WhenConfigExists()
     {
-        File.WriteAllText(Path.Combine(_tempDir, "persistence.project.json"), "{}");
-        var ctx = new ServerContext(_tempDir);
+        File.WriteAllText(Path_("pondhawk.project.json"), "{}");
 
-        var ex = Should.Throw<InvalidOperationException>(() => InitTool.Execute(ctx));
-        ex.Message.ShouldContain("already exists");
+        Should.Throw<InvalidOperationException>(() => InitTool.Execute(new ServerContext(_tempDir)))
+            .Message.ShouldContain("already exists");
     }
 
     [Fact]
-    public void Init_AppliesProviderParameter()
+    public void Init_AppliesProjectNameParameter()
     {
-        var ctx = new ServerContext(_tempDir);
-        InitTool.Execute(ctx, provider: "postgresql");
+        InitTool.Execute(new ServerContext(_tempDir), projectName: "Catalog");
 
-        var config = File.ReadAllText(Path.Combine(_tempDir, "persistence.project.json"));
-        config.ShouldContain("postgresql");
+        ProjectConfigurationLoader.Load(Path_("pondhawk.project.json")).ProjectName.ShouldBe("Catalog");
+        ModelFileLoader.Load(Path_("model.json")).Name.ShouldBe("Catalog");
     }
 
     [Fact]
     public void Init_AppliesNamespaceParameter()
     {
-        var ctx = new ServerContext(_tempDir);
-        InitTool.Execute(ctx, @namespace: "Acme.Data");
+        InitTool.Execute(new ServerContext(_tempDir), @namespace: "Acme.Data");
 
-        var config = File.ReadAllText(Path.Combine(_tempDir, "persistence.project.json"));
-        config.ShouldContain("Acme.Data");
+        ProjectConfigurationLoader.Load(Path_("pondhawk.project.json")).Values["Namespace"].ShouldBe("Acme.Data");
+    }
+
+    [Fact]
+    public void Init_AppliesOutputDirParameter()
+    {
+        InitTool.Execute(new ServerContext(_tempDir), outputDir: "gen");
+
+        ProjectConfigurationLoader.Load(Path_("pondhawk.project.json")).OutputDir.ShouldBe("gen");
     }
 
     [Fact]
     public void Init_GeneratedTemplatesAreValidLiquid()
     {
+        InitTool.Execute(new ServerContext(_tempDir));
+        var engine = new TemplateEngine();
+
+        foreach (var name in new[] { "entity.generated.liquid", "entity.stub.liquid" })
+        {
+            var source = File.ReadAllText(Path_("templates", name));
+            engine.TryParse(source, out _, out var error).ShouldBeTrue($"{name}: {error}");
+        }
+    }
+
+    [Fact]
+    public void Init_ScaffoldedProjectValidatesCleanly()
+    {
+        // The scaffold is the first thing anyone runs, so it must not emit its own warnings.
         var ctx = new ServerContext(_tempDir);
         InitTool.Execute(ctx);
 
-        var entityTemplate = File.ReadAllText(Path.Combine(_tempDir, "templates", "entity.generated.liquid"));
-        var engine = new Pondhawk.Persistence.Core.Rendering.TemplateEngine();
-        engine.TryParse(entityTemplate, out _, out var error).ShouldBeTrue(error);
+        var rawJson = File.ReadAllText(Path_("pondhawk.project.json"));
+        var config = ProjectConfigurationLoader.Deserialize(rawJson);
+        var result = ConfigurationValidator.Validate(rawJson, config, _tempDir);
+
+        result.Errors.ShouldBeEmpty();
+        result.Warnings.ShouldBeEmpty();
     }
 
     [Fact]
-    public void Init_CreatesEnvFileWithProviderPlaceholder()
+    public void Init_ScaffoldedProjectGenerates()
     {
         var ctx = new ServerContext(_tempDir);
-        InitTool.Execute(ctx, provider: "postgresql");
+        InitTool.Execute(ctx);
 
-        var envContent = File.ReadAllText(Path.Combine(_tempDir, ".env"));
-        envContent.ShouldContain("DB_CONNECTION=");
-        envContent.ShouldContain("Host=localhost");
+        GenerateTool.Execute(ctx);
+
+        var generated = Path_("src", "Generated", "Product.generated.cs");
+        File.Exists(generated).ShouldBeTrue();
+
+        var content = File.ReadAllText(generated);
+        content.ShouldContain("public partial class Product");
+        content.ShouldContain("public int Id { get; set; }");
+        content.ShouldContain("public decimal Price { get; set; }");
     }
 
     [Fact]
-    public void Init_ConnectionStringParam_WrittenToEnvFile()
+    public void Init_StarterModelMatchesItsSchema()
     {
-        var ctx = new ServerContext(_tempDir);
-        InitTool.Execute(ctx, provider: "sqlserver", connectionString: "Server=prod;Database=MyDb;User=sa;Password=secret");
+        InitTool.Execute(new ServerContext(_tempDir));
 
-        var envContent = File.ReadAllText(Path.Combine(_tempDir, ".env"));
-        envContent.ShouldContain("DB_CONNECTION=Server=prod;Database=MyDb;User=sa;Password=secret");
-    }
-
-    [Fact]
-    public void Init_NoConnectionString_UsesPlaceholder()
-    {
-        var ctx = new ServerContext(_tempDir);
-        InitTool.Execute(ctx, provider: "sqlite");
-
-        var envContent = File.ReadAllText(Path.Combine(_tempDir, ".env"));
-        envContent.ShouldContain("DB_CONNECTION=Data Source=");
+        ModelFileSchema.Validate(File.ReadAllText(Path_("model.json"))).ShouldBeEmpty();
     }
 
     [Fact]
     public void Init_ConfigIncludesLoggingSectionDisabled()
     {
-        var ctx = new ServerContext(_tempDir);
-        InitTool.Execute(ctx);
+        InitTool.Execute(new ServerContext(_tempDir));
 
-        var config = File.ReadAllText(Path.Combine(_tempDir, "persistence.project.json"));
+        var config = File.ReadAllText(Path_("pondhawk.project.json"));
         config.ShouldContain("Logging");
         config.ShouldContain("\"Enabled\": false");
+    }
+
+    [Fact]
+    public void Init_DoesNotOverwriteAnExistingModel()
+    {
+        File.WriteAllText(Path_("model.json"), """{ "Name": "Mine", "Nodes": [] }""");
+        InitTool.Execute(new ServerContext(_tempDir));
+
+        ModelFileLoader.Load(Path_("model.json")).Name.ShouldBe("Mine");
     }
 }

@@ -14,11 +14,9 @@ public class ProjectConfigurationTests
     {
         var config = ProjectConfigurationLoader.Load(FixturePath("minimal.json"));
 
-        config.Connection.Provider.ShouldBe("sqlite");
-        config.Connection.ConnectionString.ShouldBe("Data Source=test.db");
-        config.OutputDir.ShouldBe("src/Data");
+        config.OutputDir.ShouldBe("src/Generated");
         config.Templates.ShouldContainKey("entity");
-        config.Templates["entity"].Scope.ShouldBe("PerModel");
+        config.Templates["entity"].Scope.ShouldBe("PerItem");
         config.Templates["entity"].Mode.ShouldBe("Always");
     }
 
@@ -27,48 +25,54 @@ public class ProjectConfigurationTests
     {
         var config = ProjectConfigurationLoader.Load(FixturePath("full.json"));
 
-        config.Connection.Provider.ShouldBe("sqlserver");
-        config.Connection.ConnectionString.ShouldContain("Inventory");
-
-        config.DataTypes.ShouldContainKey("Uid");
-        config.DataTypes["Uid"].ClrType.ShouldBe("string");
-        config.DataTypes["Uid"].MaxLength.ShouldBe(28);
-        config.DataTypes["Uid"].DefaultValue.ShouldBe("Ulid.NewUlid()");
-
-        config.DataTypes.ShouldContainKey("Money");
-        config.DataTypes["Money"].ClrType.ShouldBe("decimal");
-
-        config.TypeMappings.Count.ShouldBe(3);
-        config.TypeMappings[0].DbType.ShouldBe("char(28)");
-        config.TypeMappings[0].DataType.ShouldBe("Uid");
-        config.TypeMappings[2].ClrType.ShouldBe("byte");
+        config.ProjectName.ShouldBe("catalog");
+        config.OutputDir.ShouldBe("src/Generated");
 
         config.Templates.Count.ShouldBe(3);
-        config.Templates["dbcontext"].Scope.ShouldBe("SingleFile");
+        config.Templates["registry"].Scope.ShouldBe("Single");
+        config.Templates["entity"].AppliesTo.ShouldBe("Class");
 
-        config.Defaults.Namespace.ShouldBe("MyApp.Data");
-        config.Defaults.ContextName.ShouldBe("Inventory");
-        config.Defaults.Schema.ShouldBe("dbo");
-        config.Defaults.IncludeViews.ShouldBeFalse();
-        config.Defaults.Include.ShouldNotBeNull();
-        config.Defaults.Include!.Count.ShouldBe(3);
-        config.Defaults.Exclude.ShouldNotBeNull();
-        config.Defaults.Exclude!.Count.ShouldBe(2);
+        config.Values["Namespace"].ShouldBe("Catalog.Data");
+        config.Values["Retries"].ShouldBe(3L);
+        config.Values["Strict"].ShouldBe(true);
 
-        config.Relationships.Count.ShouldBe(1);
-        config.Relationships[0].DependentTable.ShouldBe("Products");
-        config.Relationships[0].PrincipalTable.ShouldBe("Categories");
-        config.Relationships[0].OnDelete.ShouldBe("NoAction");
+        config.Overrides.Count.ShouldBe(4);
+        config.Overrides[0].Path.ShouldBe("*/CreatedAt");
+        config.Overrides[0].Variant.ShouldBe("AuditTimestamp");
+        config.Overrides[2].Metadata.ShouldNotBeNull();
+        config.Overrides[2].Metadata!["Access"].ShouldBe("internal");
+        config.Overrides[3].Ignore.ShouldBeTrue();
 
-        config.Overrides.Count.ShouldBe(3);
-        config.Overrides[0].Class.ShouldBe("*");
-        config.Overrides[0].Property.ShouldBe("Id");
-        config.Overrides[0].DataType.ShouldBe("Uid");
-
-        config.Logging.Enabled.ShouldBeFalse();
+        config.Logging.Enabled.ShouldBeTrue();
         config.Logging.Level.ShouldBe("Debug");
         config.Logging.RollingInterval.ShouldBe("Day");
         config.Logging.RetainedFileCountLimit.ShouldBe(7);
+    }
+
+    [Fact]
+    public void Values_PreserveJsonTypes()
+    {
+        // Values reach templates directly, so they must arrive as CLR primitives
+        // rather than JsonElement.
+        var config = ProjectConfigurationLoader.Deserialize("""
+            { "Values": { "Text": "x", "Count": 42, "Ratio": 1.5, "On": true, "Off": null } }
+            """);
+
+        config.Values["Text"].ShouldBe("x");
+        config.Values["Count"].ShouldBe(42L);
+        config.Values["Ratio"].ShouldBe(1.5);
+        config.Values["On"].ShouldBe(true);
+        config.Values["Off"].ShouldBeNull();
+    }
+
+    [Fact]
+    public void Values_AreCaseInsensitive()
+    {
+        var config = ProjectConfigurationLoader.Deserialize("""
+            { "Values": { "Namespace": "MyApp" } }
+            """);
+
+        config.Values["namespace"].ShouldBe("MyApp");
     }
 
     [Fact]
@@ -90,14 +94,10 @@ public class ProjectConfigurationTests
     {
         var config = ProjectConfigurationLoader.Deserialize("{}");
 
-        config.Connection.ShouldNotBeNull();
-        config.Connection.Provider.ShouldBe("");
-        config.Connection.ConnectionString.ShouldBe("");
         config.OutputDir.ShouldBe("");
         config.Templates.ShouldBeEmpty();
-        config.Defaults.ShouldNotBeNull();
-        config.Defaults.Schema.ShouldBe("dbo");
-        config.Defaults.IncludeViews.ShouldBeFalse();
+        config.Values.ShouldBeEmpty();
+        config.Overrides.ShouldBeEmpty();
         config.Logging.Enabled.ShouldBeFalse();
         config.Logging.LogPath.ShouldBe(".pondhawk/logs/pondhawk.log");
     }
@@ -109,9 +109,8 @@ public class ProjectConfigurationTests
         var json = ProjectConfigurationLoader.Serialize(original);
         var roundTripped = ProjectConfigurationLoader.Deserialize(json);
 
-        roundTripped.Connection.Provider.ShouldBe(original.Connection.Provider);
-        roundTripped.DataTypes.Count.ShouldBe(original.DataTypes.Count);
-        roundTripped.TypeMappings.Count.ShouldBe(original.TypeMappings.Count);
+        roundTripped.OutputDir.ShouldBe(original.OutputDir);
+        roundTripped.Values.Count.ShouldBe(original.Values.Count);
         roundTripped.Templates.Count.ShouldBe(original.Templates.Count);
         roundTripped.Overrides.Count.ShouldBe(original.Overrides.Count);
     }
@@ -123,7 +122,6 @@ public class ProjectConfigurationTests
         {
             "ProjectName": "connect-accounting",
             "Description": "Accounting database for Connect platform",
-            "Connection": { "Provider": "sqlite", "ConnectionString": "test" },
             "OutputDir": "out",
             "Templates": {}
         }
@@ -164,7 +162,6 @@ public class ProjectConfigurationTests
     {
         var json = """
         {
-            "Connection": { "Provider": "sqlite", "ConnectionString": "test" },
             "OutputDir": "out",
             "Templates": {}
         }

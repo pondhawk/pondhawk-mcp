@@ -4,8 +4,6 @@ using Fluid;
 using Fluid.Values;
 using Humanizer;
 using Pondhawk.Persistence.Core.Models;
-using Attribute = Pondhawk.Persistence.Core.Models.Attribute;
-using Models_Attribute = Pondhawk.Persistence.Core.Models.Attribute;
 
 namespace Pondhawk.Persistence.Core.Rendering;
 
@@ -81,23 +79,16 @@ public sealed partial class TemplateEngine
                 ? an as string ?? ""
                 : "";
 
-            string variantName;
-            string suffix;
-
-            switch (obj)
+            if (obj is not Node node)
             {
-                case Model model:
-                    variantName = model.GetVariant(artifactName);
-                    suffix = "Class";
-                    break;
-                case Models_Attribute attr:
-                    variantName = attr.GetVariant(artifactName);
-                    suffix = "Property";
-                    break;
-                default:
-                    await writer.WriteAsync($"/* dispatch error: unknown type '{obj?.GetType().Name}' */");
-                    return Fluid.Ast.Completion.Normal;
+                await writer.WriteAsync($"/* dispatch error: expected a model node, got '{obj?.GetType().Name ?? "nothing"}' */");
+                return Fluid.Ast.Completion.Normal;
             }
+
+            // The node's Kind names the macro to call, so a Kind of "Property" renders through
+            // DefaultProperty and a variant of "Currency" through CurrencyProperty.
+            var variantName = node.GetVariant(artifactName);
+            var suffix = node.Kind;
 
             // Build macro name: {Variant}{Suffix} or Default{Suffix}
             var macroName = string.IsNullOrEmpty(variantName)
@@ -115,7 +106,7 @@ public sealed partial class TemplateEngine
             }
             else
             {
-                // Fall back to DefaultClass / DefaultProperty
+                // Fall back to the Kind's default macro when the variant has none defined.
                 var defaultName = $"Default{suffix}";
                 var defaultFunc = context.GetValue(defaultName);
                 if (defaultFunc is FunctionValue fallback)
@@ -156,7 +147,7 @@ public sealed partial class TemplateEngine
             throw new InvalidOperationException($"Undefined variable: '{name}'");
 
         RegisterFilters(options);
-        AllowModelTypes(options);
+        RegisterModelAccess(options);
 
         var context = new TemplateContext(options);
         return context;
@@ -208,18 +199,15 @@ public sealed partial class TemplateEngine
         });
     }
 
-    private static void AllowModelTypes(TemplateOptions options)
+    private static void RegisterModelAccess(TemplateOptions options)
     {
-        options.MemberAccessStrategy.Register<Model>();
-        options.MemberAccessStrategy.Register<Models_Attribute>();
-        options.MemberAccessStrategy.Register<ForeignKey>();
-        options.MemberAccessStrategy.Register<ReferencingForeignKey>();
-        options.MemberAccessStrategy.Register<PrimaryKeyInfo>();
-        options.MemberAccessStrategy.Register<IndexInfo>();
-        options.MemberAccessStrategy.Register<Configuration.DefaultsConfig>();
+        // Nodes and the model root resolve members dynamically — contract members first, then
+        // metadata — which is what lets a template read {{ p.Type }} from an input model whose
+        // shape the engine has no knowledge of.
+        options.MemberAccessStrategy.Register<Node, object?>((node, name) => node.GetMember(name));
+        options.MemberAccessStrategy.Register<ModelFile, object?>((model, name) => model.GetMember(name));
+
         options.MemberAccessStrategy.Register<Configuration.ProjectConfiguration>();
-        options.MemberAccessStrategy.Register<Configuration.DataTypeConfig>();
-        options.MemberAccessStrategy.Register<Configuration.ConnectionConfig>();
         options.MemberAccessStrategy.Register<Configuration.TemplateConfig>();
         options.MemberAccessStrategy.Register<Configuration.LoggingConfig>();
     }

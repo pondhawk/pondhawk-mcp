@@ -1,60 +1,41 @@
 using Pondhawk.Persistence.Core.Models;
 using Shouldly;
-using Attribute = Pondhawk.Persistence.Core.Models.Attribute;
 
 namespace Pondhawk.Persistence.Core.Tests.Models;
 
 public class VariantResolutionTests
 {
     [Fact]
-    public void Model_GetVariant_ReturnsCorrectVariantPerArtifact()
+    public void GetVariant_ReturnsCorrectVariantPerArtifact()
     {
-        var model = new Model { Name = "Orders" };
-        model.SetVariant("entity", "SoftDelete");
-        model.SetVariant("dto", "ReadOnly");
+        var node = new Node { Name = "Orders", Kind = "Class" };
+        node.SetVariant("entity", "SoftDelete");
+        node.SetVariant("dto", "ReadOnly");
 
-        model.GetVariant("entity").ShouldBe("SoftDelete");
-        model.GetVariant("dto").ShouldBe("ReadOnly");
+        node.GetVariant("entity").ShouldBe("SoftDelete");
+        node.GetVariant("dto").ShouldBe("ReadOnly");
     }
 
     [Fact]
-    public void Model_GetVariant_ReturnsEmptyForUnassigned()
+    public void GetVariant_ReturnsEmptyForUnassigned()
     {
-        var model = new Model { Name = "Products" };
-        model.GetVariant("entity").ShouldBe("");
+        var node = new Node { Name = "Products", Kind = "Class" };
+        node.GetVariant("entity").ShouldBe("");
     }
 
     [Fact]
-    public void Model_GetVariant_UnmatchedArtifact_ReturnsEmpty()
+    public void GetVariant_UnmatchedArtifact_ReturnsEmpty()
     {
-        var model = new Model { Name = "Products" };
-        model.SetVariant("entity", "SoftDelete");
-        model.GetVariant("other").ShouldBe("");
+        var node = new Node { Name = "Products", Kind = "Class" };
+        node.SetVariant("entity", "SoftDelete");
+        node.GetVariant("other").ShouldBe("");
     }
 
     [Fact]
-    public void Attribute_GetVariant_ReturnsCorrectVariantPerArtifact()
+    public void GetVariant_IsCaseInsensitiveOnArtifactName()
     {
-        var attr = new Attribute { Name = "Price" };
-        attr.SetVariant("entity", "Currency");
-        attr.SetVariant("dto", "FormattedCurrency");
-
-        attr.GetVariant("entity").ShouldBe("Currency");
-        attr.GetVariant("dto").ShouldBe("FormattedCurrency");
-    }
-
-    [Fact]
-    public void Attribute_GetVariant_ReturnsEmptyForUnassigned()
-    {
-        var attr = new Attribute { Name = "Id" };
-        attr.GetVariant("entity").ShouldBe("");
-    }
-
-    [Fact]
-    public void Attribute_GetVariant_UnmatchedArtifact_ReturnsEmpty()
-    {
-        var attr = new Attribute { Name = "Price" };
-        attr.SetVariant("entity", "Currency");
-        attr.GetVariant("other").ShouldBe("");
+        var node = new Node { Name = "Price", Kind = "Property" };
+        node.SetVariant("entity", "Currency");
+        node.GetVariant("ENTITY").ShouldBe("Currency");
     }
 }

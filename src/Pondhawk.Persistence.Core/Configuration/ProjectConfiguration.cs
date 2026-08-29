@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Pondhawk.Persistence.Core.Json;
 
 namespace Pondhawk.Persistence.Core.Configuration;
 
@@ -11,75 +12,62 @@ public sealed class ProjectConfiguration
     public string? ProjectName { get; set; }
     public string? Description { get; set; }
 
-    public ConnectionConfig Connection { get; set; } = new();
     public string OutputDir { get; set; } = "";
     public Dictionary<string, TemplateConfig> Templates { get; set; } = new();
-    public DefaultsConfig Defaults { get; set; } = new();
-    public Dictionary<string, DataTypeConfig> DataTypes { get; set; } = new();
-    public List<TypeMappingConfig> TypeMappings { get; set; } = [];
-    public List<RelationshipConfig> Relationships { get; set; } = [];
+
+    /// <summary>
+    /// Project-wide values handed to every template as {{ values.X }} — a namespace, a package
+    /// name, a copyright line. Open-ended by design: what belongs here depends entirely on what
+    /// the templates generate.
+    /// </summary>
+    [JsonConverter(typeof(PlainDictionaryConverter))]
+    public Dictionary<string, object?> Values { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
     public List<OverrideConfig> Overrides { get; set; } = [];
     public LoggingConfig Logging { get; set; } = new();
-}
-
-public sealed class ConnectionConfig
-{
-    public string Provider { get; set; } = "";
-    public string ConnectionString { get; set; } = "";
 }
 
 public sealed class TemplateConfig
 {
     public string Path { get; set; } = "";
     public string OutputPattern { get; set; } = "";
+
+    /// <summary>"PerItem" renders once per matching node; "Single" renders one file for all of them.</summary>
     public string Scope { get; set; } = "";
+
+    /// <summary>"Always" overwrites on every run; "SkipExisting" writes once and then leaves the file alone.</summary>
     public string Mode { get; set; } = "";
+
+    /// <summary>
+    /// Restricts this template to nodes of one Kind. Empty or "All" matches every top-level node.
+    /// </summary>
     public string? AppliesTo { get; set; }
 }
 
-public sealed class DefaultsConfig
-{
-    public string? Namespace { get; set; }
-    public string? ContextName { get; set; }
-    public string Schema { get; set; } = "dbo";
-    public bool IncludeViews { get; set; }
-    public List<string>? Include { get; set; }
-    public List<string>? Exclude { get; set; }
-}
-
-public sealed class DataTypeConfig
-{
-    public string ClrType { get; set; } = "";
-    public int? MaxLength { get; set; }
-    public string? DefaultValue { get; set; }
-}
-
-public sealed class TypeMappingConfig
-{
-    public string DbType { get; set; } = "";
-    public string? DataType { get; set; }
-    public string? ClrType { get; set; }
-}
-
-public sealed class RelationshipConfig
-{
-    public string DependentTable { get; set; } = "";
-    public string? DependentSchema { get; set; }
-    public List<string> DependentColumns { get; set; } = [];
-    public string PrincipalTable { get; set; } = "";
-    public string? PrincipalSchema { get; set; }
-    public List<string> PrincipalColumns { get; set; } = [];
-    public string OnDelete { get; set; } = "NoAction";
-}
-
+/// <summary>
+/// A rule that changes how matched nodes render for one artifact — selecting a variant macro,
+/// merging extra metadata, or dropping the node entirely.
+/// </summary>
 public sealed class OverrideConfig
 {
-    public string Class { get; set; } = "";
-    public string? Property { get; set; }
+    /// <summary>
+    /// Slash-delimited node path. '*' matches one node, '**' matches any depth:
+    /// "Products/Price", "*/CreatedAt", "Orders/**".
+    /// </summary>
+    public string Path { get; set; } = "";
+
+    /// <summary>Template key this rule applies to. Empty applies it to every template.</summary>
     public string? Artifact { get; set; }
+
+    /// <summary>Macro variant to render matched nodes with, e.g. "Currency" for CurrencyProperty.</summary>
     public string? Variant { get; set; }
-    public string? DataType { get; set; }
+
+    /// <summary>Drops matched nodes from this artifact.</summary>
     public bool Ignore { get; set; }
+
+    /// <summary>Metadata merged onto matched nodes, overwriting keys the model itself supplied.</summary>
+    [JsonConverter(typeof(PlainDictionaryConverter))]
+    public Dictionary<string, object?>? Metadata { get; set; }
 }
 
 public sealed class LoggingConfig
@@ -102,26 +90,15 @@ public partial class ProjectConfigurationContext : JsonSerializerContext;
 
 public static class ProjectConfigurationLoader
 {
-    public static ProjectConfiguration Load(string filePath)
-    {
-        var json = File.ReadAllText(filePath);
-        return Deserialize(json);
-    }
+    public static ProjectConfiguration Load(string filePath) => Deserialize(File.ReadAllText(filePath));
 
     public static ProjectConfiguration Deserialize(string json)
-    {
-        return JsonSerializer.Deserialize(json, ProjectConfigurationContext.Default.ProjectConfiguration)
-               ?? throw new JsonException("Failed to deserialize configuration: result was null");
-    }
+        => JsonSerializer.Deserialize(json, ProjectConfigurationContext.Default.ProjectConfiguration)
+           ?? throw new JsonException("Failed to deserialize configuration: result was null");
 
     public static string Serialize(ProjectConfiguration config)
-    {
-        return JsonSerializer.Serialize(config, ProjectConfigurationContext.Default.ProjectConfiguration);
-    }
+        => JsonSerializer.Serialize(config, ProjectConfigurationContext.Default.ProjectConfiguration);
 
     public static void Save(string filePath, ProjectConfiguration config)
-    {
-        var json = Serialize(config);
-        File.WriteAllText(filePath, json, new System.Text.UTF8Encoding(false));
-    }
+        => File.WriteAllText(filePath, Serialize(config), new System.Text.UTF8Encoding(false));
 }

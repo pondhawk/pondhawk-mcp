@@ -1,277 +1,190 @@
 using Pondhawk.Persistence.Core.Configuration;
-using Pondhawk.Persistence.Core.Introspection;
 using Pondhawk.Persistence.Core.Models;
 using Pondhawk.Persistence.Core.Rendering;
-using Pondhawk.Persistence.Core.Tests.Fixtures;
-using Fluid;
 using Fluid.Values;
 using Shouldly;
-using Attribute = Pondhawk.Persistence.Core.Models.Attribute;
 
 namespace Pondhawk.Persistence.Core.Tests.Pipeline;
 
+/// <summary>
+/// End-to-end through the Core pieces generation actually composes:
+/// load the model, apply overrides, render through dispatch, write the file.
+/// </summary>
 public class GeneratePipelineTests : IDisposable
 {
-    private readonly SqliteTestDatabase _db;
-    private readonly TemplateEngine _engine = new();
     private readonly string _tempDir;
+    private readonly TemplateEngine _engine = new();
 
     public GeneratePipelineTests()
     {
-        _tempDir = Path.Combine(Path.GetTempPath(), $"pondhawk_pipeline_{Guid.NewGuid():N}");
+        _tempDir = Path.Combine(Path.GetTempPath(), $"pondhawk_pipe_{Guid.NewGuid():N}");
         Directory.CreateDirectory(_tempDir);
-
-        _db = new SqliteTestDatabase()
-            .AddTable("Categories", "Id INTEGER PRIMARY KEY, Name TEXT NOT NULL, Description TEXT")
-            .AddTable("Products", "Id INTEGER PRIMARY KEY, Name TEXT NOT NULL, Price REAL, CategoryId INTEGER REFERENCES Categories(Id)")
-            .AddTable("Orders", "Id INTEGER PRIMARY KEY, OrderDate TEXT NOT NULL, CustomerId INTEGER, Total REAL")
-            .AddView("ActiveProducts", "SELECT Id, Name, Price FROM Products WHERE Price > 0")
-            .Build();
     }
 
     public void Dispose()
     {
-        _db.Dispose();
         if (Directory.Exists(_tempDir))
             Directory.Delete(_tempDir, true);
     }
 
-    private List<Model> IntrospectAndProcess(ProjectConfiguration config, bool includeViews = false)
-    {
-        var models = SchemaIntrospector.Introspect(
-            _db.Connection, "sqlite", config.Defaults,
-            includeViews: includeViews);
-
-        var typeMapper = new TypeMapper("sqlite", config.TypeMappings, config.DataTypes);
-        foreach (var m in models)
-            foreach (var a in m.Attributes)
-                typeMapper.ApplyMapping(a);
-
-        RelationshipMerger.Merge(models, config.Relationships, config.Defaults.Schema);
-        return models;
-    }
-
-    [Fact]
-    public void FullPipeline_PerModel_ProducesCorrectOutput()
-    {
-        var config = new ProjectConfiguration
+    private const string ModelJson = """
         {
-            Defaults = new DefaultsConfig { Namespace = "TestApp.Data", Schema = "main" }
-        };
-
-        var models = IntrospectAndProcess(config);
-        models.Count.ShouldBeGreaterThanOrEqualTo(3); // Categories, Products, Orders
-
-        var templateSource = """
-            namespace {{ config.Defaults.Namespace }}.Entities;
-
-            {%- macro DefaultClass(m) %}
-            public partial class {{ m.Name | pascal_case }}
-            {%- endmacro %}
-
-            {% dispatch entity %}
+          "Name": "Catalog",
+          "Nodes": [
             {
-
-            {%- macro DefaultProperty(a) %}
-                public {{ a.ClrType | type_nullable: a.IsNullable }} {{ a.Name | pascal_case }} { get; set; }
-            {%- endmacro %}
-
-            {%- for a in entity.Attributes %}
-            {% dispatch a %}
-            {%- endfor %}
-
-            {%- for fk in entity.ForeignKeys %}
-                public virtual {{ fk.PrincipalTable | pascal_case | singularize }} {{ fk.PrincipalTable | pascal_case | singularize }} { get; set; } = null!;
-            {%- endfor %}
-            }
-            """;
-
-        _engine.TryParse(templateSource, out var template, out var error).ShouldBeTrue(error);
-
-        var products = models.First(m => m.Name == "Products");
-        var ctx = _engine.CreateContext();
-        ctx.SetValue("entity", FluidValue.Create(products, ctx.Options));
-        ctx.SetValue("config", FluidValue.Create(config, ctx.Options));
-        ctx.AmbientValues["ArtifactName"] = "entity";
-
-        var result = _engine.Render(template, ctx);
-
-        result.ShouldContain("namespace TestApp.Data.Entities;");
-        result.ShouldContain("public partial class Products");
-        // SQLite columns may report as nullable; check type and property name
-        result.ShouldContain("Id { get; set; }");
-        result.ShouldContain("Name { get; set; }");
-        result.ShouldContain("public virtual Category Category { get; set; } = null!;");
-    }
-
-    [Fact]
-    public void FullPipeline_SingleFile_RendersAllEntities()
-    {
-        var config = new ProjectConfiguration
-        {
-            Defaults = new DefaultsConfig { Namespace = "TestApp.Data", ContextName = "TestApp", Schema = "main" }
-        };
-
-        var models = IntrospectAndProcess(config);
-
-        var templateSource = """
-            namespace {{ config.Defaults.Namespace }};
-
-            public partial class {{ config.Defaults.ContextName }}DbContext
-            {
-            {%- for e in entities %}
-                public DbSet<{{ e.Name | pascal_case }}> {{ e.Name | pascal_case | pluralize }} { get; set; }
-            {%- endfor %}
-            }
-            """;
-
-        _engine.TryParse(templateSource, out var template, out _).ShouldBeTrue();
-
-        var ctx = _engine.CreateContext();
-        ctx.SetValue("entities", FluidValue.Create(models, ctx.Options));
-        ctx.SetValue("config", FluidValue.Create(config, ctx.Options));
-        ctx.AmbientValues["ArtifactName"] = "dbcontext";
-
-        var result = _engine.Render(template, ctx);
-
-        result.ShouldContain("TestAppDbContext");
-        result.ShouldContain("Products");
-        result.ShouldContain("Categories");
-        result.ShouldContain("Orders");
-    }
-
-    [Fact]
-    public void FullPipeline_SkipExisting_SkipsExistingFiles()
-    {
-        var outputDir = Path.Combine(_tempDir, "output");
-        Directory.CreateDirectory(outputDir);
-
-        // Pre-create a file
-        var existingPath = Path.Combine(outputDir, "Products.cs");
-        File.WriteAllText(existingPath, "// custom code");
-
-        var result = FileWriter.WriteFile(existingPath, "// generated", "SkipExisting");
-        result.Action.ShouldBe("SkippedExisting");
-        File.ReadAllText(existingPath).ShouldBe("// custom code");
-    }
-
-    [Fact]
-    public void FullPipeline_IncludeExclude_FiltersModels()
-    {
-        var config = new ProjectConfiguration
-        {
-            Defaults = new DefaultsConfig
-            {
-                Schema = "main",
-                Include = ["Products", "Categories"]
-            }
-        };
-
-        var models = IntrospectAndProcess(config);
-        models.Count.ShouldBe(2);
-        models.ShouldContain(m => m.Name == "Products");
-        models.ShouldContain(m => m.Name == "Categories");
-    }
-
-    [Fact]
-    public void FullPipeline_IncludeViews_True_IncludesViews()
-    {
-        var config = new ProjectConfiguration
-        {
-            Defaults = new DefaultsConfig { Schema = "main", IncludeViews = true }
-        };
-
-        var models = IntrospectAndProcess(config, includeViews: true);
-        models.ShouldContain(m => m.Name == "ActiveProducts" && m.IsView);
-    }
-
-    [Fact]
-    public void FullPipeline_IncludeViews_False_ExcludesViews()
-    {
-        var config = new ProjectConfiguration
-        {
-            Defaults = new DefaultsConfig { Schema = "main", IncludeViews = false }
-        };
-
-        var models = IntrospectAndProcess(config, includeViews: false);
-        models.ShouldNotContain(m => m.IsView);
-    }
-
-    [Fact]
-    public void FullPipeline_DispatchTag_ResolvesVariantMacros()
-    {
-        var config = new ProjectConfiguration
-        {
-            Defaults = new DefaultsConfig { Namespace = "TestApp", Schema = "main" },
-            Overrides =
-            [
-                new OverrideConfig { Class = "Products", Artifact = "entity", Variant = "Special" }
-            ]
-        };
-
-        var models = IntrospectAndProcess(config);
-        OverrideResolver.ApplyOverrides(models, "entity", config.Overrides, config.DataTypes);
-
-        var products = models.First(m => m.Name == "Products");
-        products.GetVariant("entity").ShouldBe("Special");
-
-        var templateSource = """
-            {%- macro DefaultClass(m) %}DEFAULT:{{ m.Name }}{%- endmacro %}
-            {%- macro SpecialClass(m) %}SPECIAL:{{ m.Name }}{%- endmacro %}
-            {% dispatch entity %}
-            """;
-
-        _engine.TryParse(templateSource, out var template, out _).ShouldBeTrue();
-        var ctx = _engine.CreateContext();
-        ctx.SetValue("entity", FluidValue.Create(products, ctx.Options));
-        ctx.AmbientValues["ArtifactName"] = "entity";
-
-        var result = _engine.Render(template, ctx).Trim();
-        result.ShouldBe("SPECIAL:Products");
-    }
-
-    [Fact]
-    public void FullPipeline_IgnoreOverride_RemovesProperties()
-    {
-        var config = new ProjectConfiguration
-        {
-            Defaults = new DefaultsConfig { Schema = "main" },
-            Overrides =
-            [
-                new OverrideConfig { Class = "*", Property = "Description", Artifact = "entity", Ignore = true }
-            ]
-        };
-
-        var models = IntrospectAndProcess(config);
-        OverrideResolver.ApplyOverrides(models, "entity", config.Overrides, config.DataTypes);
-
-        var categories = models.First(m => m.Name == "Categories");
-        categories.Attributes.ShouldNotContain(a => a.Name == "Description");
-        categories.Attributes.ShouldContain(a => a.Name == "Id");
-        categories.Attributes.ShouldContain(a => a.Name == "Name");
-    }
-
-    [Fact]
-    public void FullPipeline_TypeMappings_ApplyCorrectly()
-    {
-        var config = new ProjectConfiguration
-        {
-            Defaults = new DefaultsConfig { Schema = "main" },
-            DataTypes = new Dictionary<string, DataTypeConfig>
-            {
-                ["Money"] = new() { ClrType = "decimal", DefaultValue = "0m" }
+              "Name": "Product",
+              "Kind": "Class",
+              "Children": [
+                { "Name": "Id",    "Kind": "Property", "Type": "int",     "IsNullable": false },
+                { "Name": "Price", "Kind": "Property", "Type": "decimal", "IsNullable": false },
+                { "Name": "Note",  "Kind": "Property", "Type": "string",  "IsNullable": true }
+              ]
             },
-            TypeMappings =
-            [
-                new TypeMappingConfig { DbType = "REAL", DataType = "Money" }
-            ]
+            {
+              "Name": "Category",
+              "Kind": "Class",
+              "Children": [ { "Name": "Id", "Kind": "Property", "Type": "int", "IsNullable": false } ]
+            }
+          ]
+        }
+        """;
+
+    private const string EntityTemplate = """
+        namespace {{ values.Namespace }};
+
+        {%- macro DefaultClass(c) %}
+        public partial class {{ c.Name | pascal_case }}
+        {%- endmacro %}
+        {%- macro DefaultProperty(p) %}
+            public {{ p.Type | type_nullable: p.IsNullable }} {{ p.Name | pascal_case }} { get; set; }
+        {%- endmacro %}
+        {%- macro CurrencyProperty(p) %}
+            public decimal {{ p.Name | pascal_case }} { get; set; } // money
+        {%- endmacro %}
+
+        {% dispatch item %}
+        {
+        {%- for p in item.Children %}
+        {% dispatch p %}
+        {%- endfor %}
+        }
+        """;
+
+    private string Generate(string artifact, List<OverrideConfig> overrides, out ModelFile model)
+    {
+        model = ModelFileLoader.Deserialize(ModelJson);
+        var resolved = OverrideResolver.Apply(
+            model.Nodes.Select(n => n.Clone()).ToList(), artifact, overrides);
+
+        _engine.TryParse(EntityTemplate, out var template, out var error).ShouldBeTrue(error);
+
+        var ctx = _engine.CreateContext();
+        ctx.SetValue("item", FluidValue.Create(resolved[0], ctx.Options));
+        ctx.SetValue("values", FluidValue.Create(
+            new Dictionary<string, object?> { ["Namespace"] = "Catalog.Data" }, ctx.Options));
+        ctx.AmbientValues["ArtifactName"] = artifact;
+
+        return _engine.Render(template, ctx);
+    }
+
+    [Fact]
+    public void ModelToRenderedFile()
+    {
+        var content = Generate("entity", [], out _);
+
+        content.ShouldContain("namespace Catalog.Data;");
+        content.ShouldContain("public partial class Product");
+        content.ShouldContain("public int Id { get; set; }");
+        content.ShouldContain("public decimal Price { get; set; }");
+        content.ShouldContain("public string? Note { get; set; }");
+    }
+
+    [Fact]
+    public void OverrideVariant_ChangesOneNodeOnly()
+    {
+        var content = Generate("entity",
+            [new OverrideConfig { Path = "Product/Price", Artifact = "entity", Variant = "Currency" }], out _);
+
+        content.ShouldContain("public decimal Price { get; set; } // money");
+        content.ShouldContain("public int Id { get; set; }");
+    }
+
+    [Fact]
+    public void OverrideIgnore_DropsNodeFromOutput()
+    {
+        var content = Generate("entity",
+            [new OverrideConfig { Path = "Product/Note", Artifact = "entity", Ignore = true }], out _);
+
+        content.ShouldNotContain("Note");
+        content.ShouldContain("Price");
+    }
+
+    [Fact]
+    public void OverrideMetadata_ChangesRenderedType()
+    {
+        var content = Generate("entity",
+        [
+            new OverrideConfig
+            {
+                Path = "Product/Id", Artifact = "entity",
+                Metadata = new Dictionary<string, object?> { ["Type"] = "long" }
+            }
+        ], out _);
+
+        content.ShouldContain("public long Id { get; set; }");
+    }
+
+    [Fact]
+    public void OverridesDoNotLeakBetweenArtifacts()
+    {
+        // Generation clones before applying overrides; without that, a variant set for one
+        // template would still be set when the next template rendered the same node.
+        var overrides = new List<OverrideConfig>
+        {
+            new() { Path = "Product/Price", Artifact = "entity", Variant = "Currency" }
         };
 
-        var models = IntrospectAndProcess(config);
-        var products = models.First(m => m.Name == "Products");
-        var price = products.Attributes.First(a => a.Name == "Price");
+        Generate("entity", overrides, out var model).ShouldContain("// money");
+        Generate("dto", overrides, out _).ShouldNotContain("// money");
 
-        price.ClrType.ShouldBe("decimal");
-        price.DefaultValue.ShouldBe("0m");
+        // And the source model itself is untouched.
+        model.Nodes[0].Children.Single(c => c.Name == "Price").GetVariant("entity").ShouldBe("");
+    }
+
+    [Fact]
+    public void RenderedContentWritesThroughFileWriter()
+    {
+        var content = Generate("entity", [], out _);
+        var path = Path.Combine(_tempDir, "Product.generated.cs");
+
+        FileWriter.WriteFile(path, content, "Always").Action.ShouldBe("Created");
+        File.ReadAllText(path).ShouldContain("public partial class Product");
+
+        FileWriter.WriteFile(path, content, "Always").Action.ShouldBe("Overwritten");
+        FileWriter.WriteFile(path, content, "SkipExisting").Action.ShouldBe("SkippedExisting");
+    }
+
+    [Fact]
+    public void EveryNodeOfAKindRendersThroughOneMacro()
+    {
+        // The consistency guarantee: change DefaultProperty and every property in every
+        // artifact changes with it.
+        var content = Generate("entity", [], out _);
+        var propertyLines = content.Split('\n').Where(l => l.Contains("{ get; set; }")).ToList();
+
+        propertyLines.Count.ShouldBe(3);
+        propertyLines.ShouldAllBe(l => l.StartsWith("    public "));
+    }
+
+    [Fact]
+    public void ModelRoundTripsThroughDisk()
+    {
+        var path = Path.Combine(_tempDir, "model.json");
+        File.WriteAllText(path, ModelJson);
+
+        var loaded = ModelFileLoader.Load(path);
+        loaded.Name.ShouldBe("Catalog");
+        loaded.Nodes.Count.ShouldBe(2);
+        loaded.Nodes[0].Children.Count.ShouldBe(3);
     }
 }

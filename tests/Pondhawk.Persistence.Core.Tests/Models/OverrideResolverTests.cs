@@ -1,216 +1,230 @@
 using Pondhawk.Persistence.Core.Configuration;
 using Pondhawk.Persistence.Core.Models;
 using Shouldly;
-using Attribute = Pondhawk.Persistence.Core.Models.Attribute;
 
 namespace Pondhawk.Persistence.Core.Tests.Models;
 
 public class OverrideResolverTests
 {
-    private static Model MakeModel(string name, params string[] attrNames)
+    private static List<Node> Tree() =>
+    [
+        new Node
+        {
+            Name = "Product", Kind = "Class",
+            Children =
+            [
+                new Node { Name = "Id", Kind = "Property" },
+                new Node { Name = "Price", Kind = "Property" },
+                new Node { Name = "CreatedAt", Kind = "Property" }
+            ]
+        },
+        new Node
+        {
+            Name = "Order", Kind = "Class",
+            Children =
+            [
+                new Node { Name = "Id", Kind = "Property" },
+                new Node { Name = "CreatedAt", Kind = "Property" }
+            ]
+        }
+    ];
+
+    private static Node Child(List<Node> tree, string parent, string child)
+        => tree.Single(n => n.Name == parent).Children.Single(c => c.Name == child);
+
+    // --- path matching ---
+
+    [Theory]
+    [InlineData("Product", "Product", true)]
+    [InlineData("Product", "Order", false)]
+    [InlineData("Product/Price", "Product/Price", true)]
+    [InlineData("Product/Price", "Order/Price", false)]
+    [InlineData("*/CreatedAt", "Product/CreatedAt", true)]
+    [InlineData("*/CreatedAt", "Product/Price", false)]
+    [InlineData("*/CreatedAt", "CreatedAt", false)]
+    [InlineData("Product/*", "Product/Price", true)]
+    [InlineData("Product/*", "Product", false)]
+    [InlineData("Product", "Product/Price", false)]
+    [InlineData("**/CustomerId", "Orders/Submit/CustomerId", true)]
+    [InlineData("**/CustomerId", "CustomerId", true)]
+    [InlineData("Orders/**", "Orders/Submit/CustomerId", true)]
+    [InlineData("Orders/**", "Orders", true)]
+    [InlineData("Orders/**", "Product/Submit", false)]
+    [InlineData("product/price", "Product/Price", true)]
+    public void MatchesPath(string pattern, string path, bool expected)
+        => OverrideResolver.MatchesPath(pattern, path).ShouldBe(expected);
+
+    // --- variants ---
+
+    [Fact]
+    public void Apply_SetsVariantOnMatchedNode()
     {
-        var model = new Model { Name = name, Schema = "dbo" };
-        foreach (var a in attrNames)
-            model.Attributes.Add(new Attribute { Name = a, ClrType = "string", DataType = "nvarchar" });
-        return model;
+        var tree = Tree();
+        OverrideResolver.Apply(tree, "entity",
+            [new OverrideConfig { Path = "Product/Price", Artifact = "entity", Variant = "Currency" }]);
+
+        Child(tree, "Product", "Price").GetVariant("entity").ShouldBe("Currency");
+        Child(tree, "Product", "Id").GetVariant("entity").ShouldBe("");
     }
 
     [Fact]
-    public void ExactClassMatch_SetsVariant()
+    public void Apply_WildcardMatchesAcrossParents()
     {
-        var models = new List<Model> { MakeModel("Orders") };
-        var overrides = new List<OverrideConfig>
-        {
-            new() { Class = "Orders", Artifact = "entity", Variant = "SoftDelete" }
-        };
+        var tree = Tree();
+        OverrideResolver.Apply(tree, "entity",
+            [new OverrideConfig { Path = "*/CreatedAt", Artifact = "entity", Variant = "Audit" }]);
 
-        OverrideResolver.ApplyOverrides(models, "entity", overrides, new());
-        models[0].GetVariant("entity").ShouldBe("SoftDelete");
+        Child(tree, "Product", "CreatedAt").GetVariant("entity").ShouldBe("Audit");
+        Child(tree, "Order", "CreatedAt").GetVariant("entity").ShouldBe("Audit");
     }
 
     [Fact]
-    public void WildcardClassMatch_SetsVariant()
+    public void Apply_MoreLiteralSegmentsWins()
     {
-        var models = new List<Model> { MakeModel("Orders"), MakeModel("Products") };
-        var overrides = new List<OverrideConfig>
-        {
-            new() { Class = "*", Artifact = "entity", Variant = "Auditable" }
-        };
+        var tree = Tree();
+        OverrideResolver.Apply(tree, "entity",
+        [
+            new OverrideConfig { Path = "*/CreatedAt", Artifact = "entity", Variant = "Audit" },
+            new OverrideConfig { Path = "Product/CreatedAt", Artifact = "entity", Variant = "Precise" }
+        ]);
 
-        OverrideResolver.ApplyOverrides(models, "entity", overrides, new());
-        models[0].GetVariant("entity").ShouldBe("Auditable");
-        models[1].GetVariant("entity").ShouldBe("Auditable");
+        Child(tree, "Product", "CreatedAt").GetVariant("entity").ShouldBe("Precise");
+        Child(tree, "Order", "CreatedAt").GetVariant("entity").ShouldBe("Audit");
     }
 
     [Fact]
-    public void ExactClassBeatsWildcard()
+    public void Apply_SpecificityWinsRegardlessOfOrder()
     {
-        var models = new List<Model> { MakeModel("Orders") };
-        var overrides = new List<OverrideConfig>
-        {
-            new() { Class = "*", Artifact = "entity", Variant = "Generic" },
-            new() { Class = "Orders", Artifact = "entity", Variant = "Specific" }
-        };
+        var tree = Tree();
+        OverrideResolver.Apply(tree, "entity",
+        [
+            new OverrideConfig { Path = "Product/CreatedAt", Artifact = "entity", Variant = "Precise" },
+            new OverrideConfig { Path = "*/CreatedAt", Artifact = "entity", Variant = "Audit" }
+        ]);
 
-        OverrideResolver.ApplyOverrides(models, "entity", overrides, new());
-        models[0].GetVariant("entity").ShouldBe("Specific");
+        Child(tree, "Product", "CreatedAt").GetVariant("entity").ShouldBe("Precise");
     }
 
     [Fact]
-    public void LastEntryWins_SameSpecificity()
+    public void Apply_EquallySpecificRules_LaterWins()
     {
-        var models = new List<Model> { MakeModel("Orders") };
-        var overrides = new List<OverrideConfig>
-        {
-            new() { Class = "*", Artifact = "entity", Variant = "First" },
-            new() { Class = "*", Artifact = "entity", Variant = "Second" }
-        };
+        var tree = Tree();
+        OverrideResolver.Apply(tree, "entity",
+        [
+            new OverrideConfig { Path = "Product/Price", Artifact = "entity", Variant = "First" },
+            new OverrideConfig { Path = "Product/Price", Artifact = "entity", Variant = "Second" }
+        ]);
 
-        OverrideResolver.ApplyOverrides(models, "entity", overrides, new());
-        models[0].GetVariant("entity").ShouldBe("Second");
+        Child(tree, "Product", "Price").GetVariant("entity").ShouldBe("Second");
     }
 
     [Fact]
-    public void PropertyLevelOverride_ExactClass()
+    public void Apply_ScopesToArtifact()
     {
-        var models = new List<Model> { MakeModel("Products", "Price") };
-        var overrides = new List<OverrideConfig>
-        {
-            new() { Class = "Products", Property = "Price", Artifact = "entity", Variant = "Currency" }
-        };
+        var tree = Tree();
+        OverrideResolver.Apply(tree, "dto",
+            [new OverrideConfig { Path = "Product/Price", Artifact = "entity", Variant = "Currency" }]);
 
-        OverrideResolver.ApplyOverrides(models, "entity", overrides, new());
-        models[0].Attributes[0].GetVariant("entity").ShouldBe("Currency");
+        Child(tree, "Product", "Price").GetVariant("dto").ShouldBe("");
     }
 
     [Fact]
-    public void PropertyLevelOverride_WildcardClass()
+    public void Apply_OverrideWithoutArtifact_AppliesToEvery()
     {
-        var models = new List<Model> { MakeModel("Products", "CreatedAt"), MakeModel("Orders", "CreatedAt") };
-        var overrides = new List<OverrideConfig>
-        {
-            new() { Class = "*", Property = "CreatedAt", Artifact = "entity", Variant = "AuditTimestamp" }
-        };
+        var tree = Tree();
+        OverrideResolver.Apply(tree, "anything",
+            [new OverrideConfig { Path = "Product/Price", Variant = "Currency" }]);
 
-        OverrideResolver.ApplyOverrides(models, "entity", overrides, new());
-        models[0].Attributes[0].GetVariant("entity").ShouldBe("AuditTimestamp");
-        models[1].Attributes[0].GetVariant("entity").ShouldBe("AuditTimestamp");
+        Child(tree, "Product", "Price").GetVariant("anything").ShouldBe("Currency");
+    }
+
+    // --- ignore ---
+
+    [Fact]
+    public void Apply_IgnoreRemovesMatchedChild()
+    {
+        var tree = Tree();
+        var result = OverrideResolver.Apply(tree, "entity",
+            [new OverrideConfig { Path = "*/CreatedAt", Artifact = "entity", Ignore = true }]);
+
+        result.SelectMany(n => n.Children).ShouldNotContain(c => c.Name == "CreatedAt");
+        result[0].Children.Count.ShouldBe(2);
     }
 
     [Fact]
-    public void PropertyExactClassBeatsWildcard()
+    public void Apply_IgnoreOnRoot_RemovesWholeSubtree()
     {
-        var models = new List<Model> { MakeModel("Orders", "CreatedAt") };
-        var overrides = new List<OverrideConfig>
-        {
-            new() { Class = "*", Property = "CreatedAt", Artifact = "entity", Variant = "AuditTimestamp" },
-            new() { Class = "Orders", Property = "CreatedAt", Artifact = "entity", Variant = "OrderAudit" }
-        };
+        var result = OverrideResolver.Apply(Tree(), "entity",
+            [new OverrideConfig { Path = "Order", Artifact = "entity", Ignore = true }]);
 
-        OverrideResolver.ApplyOverrides(models, "entity", overrides, new());
-        models[0].Attributes[0].GetVariant("entity").ShouldBe("OrderAudit");
+        result.Select(n => n.Name).ShouldBe(["Product"]);
+    }
+
+    // --- metadata merge ---
+
+    [Fact]
+    public void Apply_MergesMetadataOntoMatchedNodes()
+    {
+        var tree = Tree();
+        OverrideResolver.Apply(tree, "entity",
+        [
+            new OverrideConfig
+            {
+                Path = "Product/Price", Artifact = "entity",
+                Metadata = new Dictionary<string, object?> { ["Type"] = "decimal", ["Precision"] = 18L }
+            }
+        ]);
+
+        var price = Child(tree, "Product", "Price");
+        price.Metadata["Type"].ShouldBe("decimal");
+        price.Metadata["Precision"].ShouldBe(18L);
     }
 
     [Fact]
-    public void Ignore_FiltersProperty_AllArtifacts()
+    public void Apply_MetadataOverwritesWhatTheModelDeclared()
     {
-        var models = new List<Model> { MakeModel("Orders", "Id", "RowVersion") };
-        var overrides = new List<OverrideConfig>
-        {
-            new() { Class = "*", Property = "RowVersion", Ignore = true }
-        };
+        var tree = Tree();
+        Child(tree, "Product", "Price").Metadata["Type"] = "double";
 
-        OverrideResolver.ApplyOverrides(models, "entity", overrides, new());
-        models[0].Attributes.Count.ShouldBe(1);
-        models[0].Attributes[0].Name.ShouldBe("Id");
+        OverrideResolver.Apply(tree, "entity",
+        [
+            new OverrideConfig
+            {
+                Path = "Product/Price", Artifact = "entity",
+                Metadata = new Dictionary<string, object?> { ["Type"] = "decimal" }
+            }
+        ]);
+
+        Child(tree, "Product", "Price").Metadata["Type"].ShouldBe("decimal");
     }
 
     [Fact]
-    public void Ignore_WithArtifact_FiltersOnlyForThatArtifact()
+    public void Apply_NarrowerMetadataLandsOnTopOfBroader()
     {
-        var models1 = new List<Model> { MakeModel("Orders", "Id", "InternalNotes") };
-        var models2 = new List<Model> { MakeModel("Orders", "Id", "InternalNotes") };
-        var overrides = new List<OverrideConfig>
-        {
-            new() { Class = "Orders", Property = "InternalNotes", Artifact = "dto", Ignore = true }
-        };
+        var tree = Tree();
+        OverrideResolver.Apply(tree, "entity",
+        [
+            new OverrideConfig
+            {
+                Path = "Product/Price", Artifact = "entity",
+                Metadata = new Dictionary<string, object?> { ["Type"] = "narrow" }
+            },
+            new OverrideConfig
+            {
+                Path = "*/*", Artifact = "entity",
+                Metadata = new Dictionary<string, object?> { ["Type"] = "broad", ["Access"] = "public" }
+            }
+        ]);
 
-        OverrideResolver.ApplyOverrides(models1, "dto", overrides, new());
-        models1[0].Attributes.Count.ShouldBe(1); // InternalNotes filtered
-
-        OverrideResolver.ApplyOverrides(models2, "entity", overrides, new());
-        models2[0].Attributes.Count.ShouldBe(2); // InternalNotes still present
+        var price = Child(tree, "Product", "Price");
+        price.Metadata["Type"].ShouldBe("narrow");
+        price.Metadata["Access"].ShouldBe("public");
     }
 
     [Fact]
-    public void DataType_AppliesCustomType()
+    public void Apply_NoOverrides_LeavesTreeUntouched()
     {
-        var models = new List<Model> { MakeModel("Products", "Id") };
-        models[0].Attributes[0].ClrType = "int";
-
-        var dataTypes = new Dictionary<string, DataTypeConfig>
-        {
-            ["Uid"] = new() { ClrType = "string", MaxLength = 28, DefaultValue = "Ulid.NewUlid()" }
-        };
-        var overrides = new List<OverrideConfig>
-        {
-            new() { Class = "*", Property = "Id", DataType = "Uid" }
-        };
-
-        OverrideResolver.ApplyOverrides(models, "entity", overrides, dataTypes);
-        models[0].Attributes[0].ClrType.ShouldBe("string");
-        models[0].Attributes[0].MaxLength.ShouldBe(28);
-        models[0].Attributes[0].DefaultValue.ShouldBe("Ulid.NewUlid()");
-    }
-
-    [Fact]
-    public void DifferentVariantsPerArtifact()
-    {
-        var models1 = new List<Model> { MakeModel("Products", "Price") };
-        var models2 = new List<Model> { MakeModel("Products", "Price") };
-        var overrides = new List<OverrideConfig>
-        {
-            new() { Class = "Products", Property = "Price", Artifact = "entity", Variant = "Currency" },
-            new() { Class = "Products", Property = "Price", Artifact = "dto", Variant = "FormattedCurrency" }
-        };
-
-        OverrideResolver.ApplyOverrides(models1, "entity", overrides, new());
-        OverrideResolver.ApplyOverrides(models2, "dto", overrides, new());
-
-        models1[0].Attributes[0].GetVariant("entity").ShouldBe("Currency");
-        models2[0].Attributes[0].GetVariant("dto").ShouldBe("FormattedCurrency");
-    }
-
-    [Fact]
-    public void VariantPlusDataType_Combined()
-    {
-        var models = new List<Model> { MakeModel("Products", "Id") };
-        var dataTypes = new Dictionary<string, DataTypeConfig>
-        {
-            ["Uid"] = new() { ClrType = "string", DefaultValue = "Ulid.NewUlid()" }
-        };
-        var overrides = new List<OverrideConfig>
-        {
-            new() { Class = "*", Property = "Id", Artifact = "entity", Variant = "UidKey", DataType = "Uid" }
-        };
-
-        OverrideResolver.ApplyOverrides(models, "entity", overrides, dataTypes);
-        models[0].Attributes[0].GetVariant("entity").ShouldBe("UidKey");
-        models[0].Attributes[0].ClrType.ShouldBe("string");
-        models[0].Attributes[0].DefaultValue.ShouldBe("Ulid.NewUlid()");
-    }
-
-    [Fact]
-    public void NoMatchingOverride_NoVariant()
-    {
-        var models = new List<Model> { MakeModel("Products", "Name") };
-        var overrides = new List<OverrideConfig>
-        {
-            new() { Class = "Orders", Artifact = "entity", Variant = "SoftDelete" }
-        };
-
-        OverrideResolver.ApplyOverrides(models, "entity", overrides, new());
-        models[0].GetVariant("entity").ShouldBe("");
-        models[0].Attributes[0].GetVariant("entity").ShouldBe("");
+        var tree = Tree();
+        OverrideResolver.Apply(tree, "entity", []).ShouldBe(tree);
     }
 }

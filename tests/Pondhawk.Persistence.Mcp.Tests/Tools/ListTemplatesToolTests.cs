@@ -29,11 +29,11 @@ public class ListTemplatesToolTests : IDisposable
         {
             Templates = new Dictionary<string, TemplateConfig>
             {
-                ["entity"] = new() { Path = "templates/entity.liquid", OutputPattern = "Entities/{{entity.Name}}.cs", Scope = "PerModel", Mode = "Always" },
-                ["dbcontext"] = new() { Path = "templates/dbcontext.liquid", OutputPattern = "MyDbContext.cs", Scope = "SingleFile", Mode = "Always" }
+                ["entity"] = new() { Path = "templates/entity.liquid", OutputPattern = "Entities/{{ item.Name }}.cs", Scope = "PerItem", Mode = "Always" },
+                ["dbcontext"] = new() { Path = "templates/dbcontext.liquid", OutputPattern = "MyDbContext.cs", Scope = "Single", Mode = "Always" }
             }
         };
-        ProjectConfigurationLoader.Save(Path.Combine(_tempDir, "persistence.project.json"), config);
+        ProjectConfigurationLoader.Save(Path.Combine(_tempDir, "pondhawk.project.json"), config);
 
         var ctx = new ServerContext(_tempDir);
         var result = ListTemplatesTool.Execute(ctx);
@@ -49,7 +49,7 @@ public class ListTemplatesToolTests : IDisposable
         {
             Templates = new Dictionary<string, TemplateConfig>()
         };
-        ProjectConfigurationLoader.Save(Path.Combine(_tempDir, "persistence.project.json"), config);
+        ProjectConfigurationLoader.Save(Path.Combine(_tempDir, "pondhawk.project.json"), config);
 
         var ctx = new ServerContext(_tempDir);
         var result = ListTemplatesTool.Execute(ctx);
@@ -65,10 +65,10 @@ public class ListTemplatesToolTests : IDisposable
         {
             Templates = new Dictionary<string, TemplateConfig>
             {
-                ["entity"] = new() { Path = "templates/entity.liquid", OutputPattern = "Entities/{{entity.Name}}.cs", Scope = "PerModel", Mode = "SkipExisting" }
+                ["entity"] = new() { Path = "templates/entity.liquid", OutputPattern = "Entities/{{ item.Name }}.cs", Scope = "PerItem", Mode = "SkipExisting" }
             }
         };
-        ProjectConfigurationLoader.Save(Path.Combine(_tempDir, "persistence.project.json"), config);
+        ProjectConfigurationLoader.Save(Path.Combine(_tempDir, "pondhawk.project.json"), config);
 
         var ctx = new ServerContext(_tempDir);
         var result = ListTemplatesTool.Execute(ctx);
@@ -77,7 +77,7 @@ public class ListTemplatesToolTests : IDisposable
         var tmpl = json.RootElement.GetProperty("Templates")[0];
         tmpl.GetProperty("Key").GetString().ShouldBe("entity");
         tmpl.GetProperty("Path").GetString().ShouldBe("templates/entity.liquid");
-        tmpl.GetProperty("Scope").GetString().ShouldBe("PerModel");
+        tmpl.GetProperty("Scope").GetString().ShouldBe("PerItem");
         tmpl.GetProperty("Mode").GetString().ShouldBe("SkipExisting");
     }
 }

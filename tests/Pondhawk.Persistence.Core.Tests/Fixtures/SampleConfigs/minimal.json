@@ -1,15 +1,11 @@
 {
-  "Connection": {
-    "Provider": "sqlite",
-    "ConnectionString": "Data Source=test.db"
-  },
-  "OutputDir": "src/Data",
-  "Templates": {
-    "entity": {
-      "Path": "templates/entity.liquid",
-      "OutputPattern": "Entities/{{entity.Name}}.cs",
-      "Scope": "PerModel",
-      "Mode": "Always"
+    "OutputDir": "src/Generated",
+    "Templates": {
+        "entity": {
+            "Path": "templates/entity.liquid",
+            "OutputPattern": "{{ item.Name | pascal_case }}.cs",
+            "Scope": "PerItem",
+            "Mode": "Always"
+        }
     }
-  }
 }

@@ -2,7 +2,6 @@ using System.Text.Json;
 using Pondhawk.Persistence.Core.Configuration;
 using Pondhawk.Persistence.Mcp;
 using Pondhawk.Persistence.Mcp.Tools;
-using Microsoft.Data.Sqlite;
 using Shouldly;
 
 namespace Pondhawk.Persistence.Mcp.Tests.Tools;
@@ -10,527 +9,377 @@ namespace Pondhawk.Persistence.Mcp.Tests.Tools;
 public class GenerateToolTests : IDisposable
 {
     private readonly string _tempDir;
-    private readonly string _dbPath;
-    private readonly string _connString;
+    private readonly string _outputDir;
 
     public GenerateToolTests()
     {
         _tempDir = Path.Combine(Path.GetTempPath(), $"pondhawk_generate_{Guid.NewGuid():N}");
         Directory.CreateDirectory(_tempDir);
-        _dbPath = Path.Combine(_tempDir, "test.db");
-        _connString = $"Data Source={_dbPath};Pooling=False";
-
-        // Create a SQLite database with schema
-        using var conn = new SqliteConnection(_connString);
-        conn.Open();
-        Execute(conn, "CREATE TABLE Products (Id INTEGER PRIMARY KEY, Name TEXT NOT NULL, Price REAL)");
-        Execute(conn, "CREATE TABLE Categories (Id INTEGER PRIMARY KEY, Title TEXT NOT NULL)");
+        _outputDir = Path.Combine(_tempDir, "output");
+        WriteModel();
     }
 
     public void Dispose()
     {
-        SqliteConnection.ClearAllPools();
         if (Directory.Exists(_tempDir))
             Directory.Delete(_tempDir, true);
     }
 
-    private ServerContext CreateContext(string? templateContent = null, string scope = "PerModel", string mode = "Always")
+    private const string DefaultModel = """
+        {
+          "Name": "Catalog",
+          "Nodes": [
+            {
+              "Name": "Products", "Kind": "Class",
+              "Children": [
+                { "Name": "Id",    "Kind": "Property", "Type": "int" },
+                { "Name": "Name",  "Kind": "Property", "Type": "string" },
+                { "Name": "Price", "Kind": "Property", "Type": "decimal" }
+              ]
+            },
+            {
+              "Name": "Categories", "Kind": "Class",
+              "Children": [ { "Name": "Title", "Kind": "Property", "Type": "string" } ]
+            },
+            { "Name": "ProductSummary", "Kind": "View" }
+          ]
+        }
+        """;
+
+    private void WriteModel(string? json = null)
+        => File.WriteAllText(Path.Combine(_tempDir, "model.json"), json ?? DefaultModel);
+
+    private ServerContext CreateContext(
+        string? templateContent = null,
+        string scope = "PerItem",
+        string mode = "Always",
+        string? appliesTo = null,
+        List<OverrideConfig>? overrides = null,
+        string outputPattern = "{{ item.Name }}.cs")
     {
         var templatesDir = Path.Combine(_tempDir, "templates");
         Directory.CreateDirectory(templatesDir);
-
-        var template = templateContent ?? "// Generated: {{ entity.Name }}";
-        File.WriteAllText(Path.Combine(templatesDir, "entity.liquid"), template);
+        File.WriteAllText(Path.Combine(templatesDir, "entity.liquid"),
+            templateContent ?? "// Generated: {{ item.Name }}");
 
         var config = new ProjectConfiguration
         {
-            Connection = new ConnectionConfig { Provider = "sqlite", ConnectionString = _connString },
-            OutputDir = Path.Combine(_tempDir, "output"),
+            OutputDir = _outputDir,
             Templates = new Dictionary<string, TemplateConfig>
             {
                 ["entity"] = new()
                 {
                     Path = "templates/entity.liquid",
-                    OutputPattern = "{{entity.Name}}.cs",
+                    OutputPattern = outputPattern,
                     Scope = scope,
-                    Mode = mode
+                    Mode = mode,
+                    AppliesTo = appliesTo
                 }
             },
-            Defaults = new DefaultsConfig { Schema = "main" }
+            Values = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Namespace"] = "Catalog.Data"
+            },
+            Overrides = overrides ?? []
         };
-        ProjectConfigurationLoader.Save(Path.Combine(_tempDir, "persistence.project.json"), config);
+
+        ProjectConfigurationLoader.Save(Path.Combine(_tempDir, "pondhawk.project.json"), config);
         return new ServerContext(_tempDir);
     }
 
-    private void IntrospectFirst(ServerContext ctx)
-    {
-        // Run introspect to create schema.json
-        IntrospectSchemaTool.Execute(ctx);
-    }
+    private string Output(string name) => Path.Combine(_outputDir, name);
 
-    private static void Execute(SqliteConnection conn, string sql)
+    // --- basics ---
+
+    [Fact]
+    public void Generate_WritesOneFilePerNode()
     {
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = sql;
-        cmd.ExecuteNonQuery();
+        GenerateTool.Execute(CreateContext());
+
+        File.Exists(Output("Products.cs")).ShouldBeTrue();
+        File.Exists(Output("Categories.cs")).ShouldBeTrue();
+        File.ReadAllText(Output("Products.cs")).ShouldContain("// Generated: Products");
     }
 
     [Fact]
-    public void Generate_ProducesOutputFiles()
+    public void Generate_ReturnsSummary()
+    {
+        var json = GenerateTool.Execute(CreateContext());
+        using var doc = JsonDocument.Parse(json);
+
+        doc.RootElement.GetProperty("Summary").GetString().ShouldContain("created");
+        doc.RootElement.GetProperty("FilesWritten").GetArrayLength().ShouldBe(3);
+    }
+
+    [Fact]
+    public void Generate_WithoutModel_Throws()
+    {
+        File.Delete(Path.Combine(_tempDir, "model.json"));
+
+        Should.Throw<InvalidOperationException>(() => GenerateTool.Execute(CreateContext()))
+            .Message.ShouldContain("model.json");
+    }
+
+    [Fact]
+    public void Generate_MalformedTemplate_Throws()
+    {
+        Should.Throw<InvalidOperationException>(() =>
+            GenerateTool.Execute(CreateContext("{% for x in %}")));
+    }
+
+    // --- context bindings ---
+
+    [Fact]
+    public void Generate_BindsValuesAndModel()
+    {
+        GenerateTool.Execute(CreateContext("{{ values.Namespace }}|{{ model.Name }}|{{ item.Name }}"));
+
+        File.ReadAllText(Output("Products.cs")).ShouldBe("Catalog.Data|Catalog|Products");
+    }
+
+    [Fact]
+    public void Generate_BindsChildrenAndMetadata()
+    {
+        GenerateTool.Execute(CreateContext("{% for p in item.Children %}{{ p.Name }}:{{ p.Type }};{% endfor %}"));
+
+        File.ReadAllText(Output("Products.cs")).ShouldBe("Id:int;Name:string;Price:decimal;");
+    }
+
+    [Fact]
+    public void Generate_BindsParameters()
+    {
+        GenerateTool.Execute(
+            CreateContext("{{ parameters.Stamp }}"),
+            parameters: new Dictionary<string, object> { ["Stamp"] = "2026" });
+
+        File.ReadAllText(Output("Products.cs")).ShouldBe("2026");
+    }
+
+    // --- scope ---
+
+    [Fact]
+    public void Generate_SingleScope_WritesOneFileForAllNodes()
+    {
+        GenerateTool.Execute(CreateContext(
+            "{% for i in items %}{{ i.Name }},{% endfor %}",
+            scope: "Single",
+            outputPattern: "All.cs"));
+
+        File.ReadAllText(Output("All.cs")).ShouldBe("Products,Categories,ProductSummary,");
+    }
+
+    // --- AppliesTo ---
+
+    [Fact]
+    public void Generate_AppliesTo_RestrictsToOneKind()
+    {
+        GenerateTool.Execute(CreateContext(appliesTo: "Class"));
+
+        File.Exists(Output("Products.cs")).ShouldBeTrue();
+        File.Exists(Output("ProductSummary.cs")).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Generate_AppliesToAll_MatchesEveryKind()
+    {
+        GenerateTool.Execute(CreateContext(appliesTo: "All"));
+
+        File.Exists(Output("ProductSummary.cs")).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Generate_AppliesToUnknownKind_WritesNothing()
+    {
+        GenerateTool.Execute(CreateContext(appliesTo: "Endpoint"));
+
+        Directory.Exists(_outputDir).ShouldBeFalse();
+    }
+
+    // --- filters ---
+
+    [Fact]
+    public void Generate_ItemsFilter_RestrictsToNamedNodes()
+    {
+        GenerateTool.Execute(CreateContext(), items: ["Products"]);
+
+        File.Exists(Output("Products.cs")).ShouldBeTrue();
+        File.Exists(Output("Categories.cs")).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Generate_TemplatesFilter_RunsOnlyNamedTemplates()
     {
         var ctx = CreateContext();
-        IntrospectFirst(ctx);
-        var result = GenerateTool.Execute(ctx);
-        var json = JsonDocument.Parse(result);
+        GenerateTool.Execute(ctx, templates: ["nosuchtemplate"]);
 
-        var files = json.RootElement.GetProperty("FilesWritten");
-        files.GetArrayLength().ShouldBe(2); // Products, Categories
+        Directory.Exists(_outputDir).ShouldBeFalse();
+    }
+
+    // --- modes ---
+
+    [Fact]
+    public void Generate_Always_OverwritesExisting()
+    {
+        GenerateTool.Execute(CreateContext("first"));
+        File.ReadAllText(Output("Products.cs")).ShouldBe("first");
+
+        GenerateTool.Execute(CreateContext("second"));
+        File.ReadAllText(Output("Products.cs")).ShouldBe("second");
     }
 
     [Fact]
-    public void Generate_ModelsParam_FiltersOutput()
+    public void Generate_SkipExisting_LeavesExistingAlone()
     {
-        var ctx = CreateContext();
-        IntrospectFirst(ctx);
-        var result = GenerateTool.Execute(ctx, models: ["Products"]);
-        var json = JsonDocument.Parse(result);
+        GenerateTool.Execute(CreateContext("first", mode: "SkipExisting"));
+        GenerateTool.Execute(CreateContext("second", mode: "SkipExisting"));
 
-        var files = json.RootElement.GetProperty("FilesWritten");
-        files.GetArrayLength().ShouldBe(1);
-        files[0].GetProperty("Path").GetString().ShouldBe("Products.cs");
+        File.ReadAllText(Output("Products.cs")).ShouldBe("first");
     }
 
     [Fact]
-    public void Generate_TemplatesParam_FiltersTemplates()
+    public void Generate_EmptyOutput_SkipsTheFile()
     {
-        // Add a second template
-        var templatesDir = Path.Combine(_tempDir, "templates");
-        Directory.CreateDirectory(templatesDir);
-        File.WriteAllText(Path.Combine(templatesDir, "entity.liquid"), "// {{ entity.Name }}");
-        File.WriteAllText(Path.Combine(templatesDir, "stub.liquid"), "// stub {{ entity.Name }}");
+        GenerateTool.Execute(CreateContext("{% if false %}x{% endif %}"));
 
-        var config = new ProjectConfiguration
-        {
-            Connection = new ConnectionConfig { Provider = "sqlite", ConnectionString = _connString },
-            OutputDir = Path.Combine(_tempDir, "output"),
-            Templates = new Dictionary<string, TemplateConfig>
-            {
-                ["entity"] = new() { Path = "templates/entity.liquid", OutputPattern = "{{entity.Name}}.cs", Scope = "PerModel", Mode = "Always" },
-                ["stub"] = new() { Path = "templates/stub.liquid", OutputPattern = "{{entity.Name}}.stub.cs", Scope = "PerModel", Mode = "Always" }
-            },
-            Defaults = new DefaultsConfig { Schema = "main" }
-        };
-        ProjectConfigurationLoader.Save(Path.Combine(_tempDir, "persistence.project.json"), config);
+        File.Exists(Output("Products.cs")).ShouldBeFalse();
+    }
 
-        var ctx = new ServerContext(_tempDir);
-        IntrospectFirst(ctx);
-        var result = GenerateTool.Execute(ctx, templates: ["stub"]);
-        var json = JsonDocument.Parse(result);
+    // --- output patterns ---
 
-        var files = json.RootElement.GetProperty("FilesWritten");
-        // Only stub templates generated (2 tables * 1 template = 2 files)
-        files.GetArrayLength().ShouldBe(2);
-        files[0].GetProperty("Path").GetString()!.ShouldContain(".stub.cs");
+    [Fact]
+    public void Generate_OutputPatternSupportsFiltersAndSubdirectories()
+    {
+        GenerateTool.Execute(CreateContext(outputPattern: "Entities/{{ item.Name | singularize }}.g.cs"));
+
+        File.Exists(Path.Combine(_outputDir, "Entities", "Product.g.cs")).ShouldBeTrue();
+    }
+
+    // --- overrides ---
+
+    [Fact]
+    public void Generate_OverrideVariant_SelectsTheVariantMacro()
+    {
+        var template = """
+            {%- macro DefaultProperty(p) %}{{ p.Name }}:default;{%- endmacro %}
+            {%- macro CurrencyProperty(p) %}{{ p.Name }}:money;{%- endmacro %}
+            {%- for p in item.Children %}{% dispatch p %}{%- endfor %}
+            """;
+
+        GenerateTool.Execute(CreateContext(template, overrides:
+            [new OverrideConfig { Path = "Products/Price", Artifact = "entity", Variant = "Currency" }]));
+
+        var content = File.ReadAllText(Output("Products.cs"));
+        content.ShouldContain("Price:money;");
+        content.ShouldContain("Id:default;");
     }
 
     [Fact]
-    public void Generate_SkipExisting_DoesNotOverwrite()
+    public void Generate_OverrideIgnore_DropsTheNode()
     {
-        var ctx = CreateContext(mode: "SkipExisting");
-        IntrospectFirst(ctx);
+        GenerateTool.Execute(CreateContext(
+            "{% for p in item.Children %}{{ p.Name }};{% endfor %}",
+            overrides: [new OverrideConfig { Path = "Products/Price", Artifact = "entity", Ignore = true }]));
 
-        // First generation creates files
+        File.ReadAllText(Output("Products.cs")).ShouldBe("Id;Name;");
+    }
+
+    [Fact]
+    public void Generate_OverrideIgnoreOnRoot_SkipsTheWholeFile()
+    {
+        GenerateTool.Execute(CreateContext(
+            overrides: [new OverrideConfig { Path = "Categories", Artifact = "entity", Ignore = true }]));
+
+        File.Exists(Output("Products.cs")).ShouldBeTrue();
+        File.Exists(Output("Categories.cs")).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Generate_OverrideMetadata_ChangesRenderedValue()
+    {
+        GenerateTool.Execute(CreateContext(
+            "{% for p in item.Children %}{{ p.Name }}:{{ p.Type }};{% endfor %}",
+            overrides:
+            [
+                new OverrideConfig
+                {
+                    Path = "Products/Id", Artifact = "entity",
+                    Metadata = new Dictionary<string, object?> { ["Type"] = "long" }
+                }
+            ]));
+
+        File.ReadAllText(Output("Products.cs")).ShouldContain("Id:long;");
+    }
+
+    [Fact]
+    public void Generate_OverridesDoNotMutateTheCachedModel()
+    {
+        // The cache hands back the same ModelFile across calls; if generation applied
+        // overrides in place, a variant would persist into the next run.
+        var ctx = CreateContext(
+            "{% for p in item.Children %}{{ p.Name }};{% endfor %}",
+            overrides: [new OverrideConfig { Path = "Products/Price", Artifact = "entity", Ignore = true }]);
+
         GenerateTool.Execute(ctx);
+        File.ReadAllText(Output("Products.cs")).ShouldBe("Id;Name;");
 
-        // Second generation should skip
-        ctx = CreateContext(mode: "SkipExisting");
-        var result = GenerateTool.Execute(ctx);
-        var json = JsonDocument.Parse(result);
-
-        var summary = json.RootElement.GetProperty("Summary").GetString()!;
-        summary.ShouldContain("skipped");
-    }
-
-    [Fact]
-    public void Generate_ThrowsWhenNoSchemaJson()
-    {
-        var ctx = CreateContext();
-        // Do NOT run introspect — schema.json should not exist
-        var ex = Should.Throw<InvalidOperationException>(() =>
-            GenerateTool.Execute(ctx));
-        ex.Message.ShouldContain("db-design.json not found");
-    }
-
-    [Fact]
-    public void Generate_ParametersPassedToTemplate()
-    {
-        var ctx = CreateContext(templateContent: "// Version: {{ parameters.version }}");
-        IntrospectFirst(ctx);
-        var parameters = new Dictionary<string, object> { ["version"] = "1.0" };
-        var result = GenerateTool.Execute(ctx, parameters: parameters, models: ["Products"]);
-
-        var outputFile = Path.Combine(_tempDir, "output", "Products.cs");
-        File.Exists(outputFile).ShouldBeTrue();
-        File.ReadAllText(outputFile).ShouldContain("Version: 1.0");
-    }
-
-    [Fact]
-    public void Generate_AppliesToTables_SkipsViews()
-    {
-        // Add a view to the database
-        using (var conn = new SqliteConnection(_connString))
-        {
-            conn.Open();
-            Execute(conn, "CREATE VIEW ProductSummary AS SELECT Id, Name FROM Products");
-        }
-
-        var templatesDir = Path.Combine(_tempDir, "templates");
-        Directory.CreateDirectory(templatesDir);
-        File.WriteAllText(Path.Combine(templatesDir, "entity.liquid"), "// {{ entity.Name }}");
-
-        var config = new ProjectConfiguration
-        {
-            Connection = new ConnectionConfig { Provider = "sqlite", ConnectionString = _connString },
-            OutputDir = Path.Combine(_tempDir, "output"),
-            Templates = new Dictionary<string, TemplateConfig>
-            {
-                ["entity"] = new()
-                {
-                    Path = "templates/entity.liquid",
-                    OutputPattern = "{{entity.Name}}.cs",
-                    Scope = "PerModel",
-                    Mode = "Always",
-                    AppliesTo = "Tables"
-                }
-            },
-            Defaults = new DefaultsConfig { Schema = "main", IncludeViews = true }
-        };
-        ProjectConfigurationLoader.Save(Path.Combine(_tempDir, "persistence.project.json"), config);
-
-        var ctx = new ServerContext(_tempDir);
-        IntrospectFirst(ctx);
-        var result = GenerateTool.Execute(ctx);
-        var json = JsonDocument.Parse(result);
-
-        var files = json.RootElement.GetProperty("FilesWritten");
-        files.GetArrayLength().ShouldBe(2); // Products, Categories — NOT ProductSummary
-        var paths = Enumerable.Range(0, files.GetArrayLength())
-            .Select(i => files[i].GetProperty("Path").GetString()!).ToList();
-        paths.ShouldNotContain("ProductSummary.cs");
-    }
-
-    [Fact]
-    public void Generate_AppliesToViews_SkipsTables()
-    {
-        using (var conn = new SqliteConnection(_connString))
-        {
-            conn.Open();
-            Execute(conn, "CREATE VIEW ProductSummary AS SELECT Id, Name FROM Products");
-        }
-
-        var templatesDir = Path.Combine(_tempDir, "templates");
-        Directory.CreateDirectory(templatesDir);
-        File.WriteAllText(Path.Combine(templatesDir, "entity.liquid"), "// {{ entity.Name }}");
-
-        var config = new ProjectConfiguration
-        {
-            Connection = new ConnectionConfig { Provider = "sqlite", ConnectionString = _connString },
-            OutputDir = Path.Combine(_tempDir, "output"),
-            Templates = new Dictionary<string, TemplateConfig>
-            {
-                ["entity"] = new()
-                {
-                    Path = "templates/entity.liquid",
-                    OutputPattern = "{{entity.Name}}.cs",
-                    Scope = "PerModel",
-                    Mode = "Always",
-                    AppliesTo = "Views"
-                }
-            },
-            Defaults = new DefaultsConfig { Schema = "main", IncludeViews = true }
-        };
-        ProjectConfigurationLoader.Save(Path.Combine(_tempDir, "persistence.project.json"), config);
-
-        var ctx = new ServerContext(_tempDir);
-        IntrospectFirst(ctx);
-        var result = GenerateTool.Execute(ctx);
-        var json = JsonDocument.Parse(result);
-
-        var files = json.RootElement.GetProperty("FilesWritten");
-        files.GetArrayLength().ShouldBe(1); // Only ProductSummary
-        files[0].GetProperty("Path").GetString().ShouldBe("ProductSummary.cs");
-    }
-
-    [Fact]
-    public void Generate_AppliesToOmitted_RunsForAll()
-    {
-        using (var conn = new SqliteConnection(_connString))
-        {
-            conn.Open();
-            Execute(conn, "CREATE VIEW ProductSummary AS SELECT Id, Name FROM Products");
-        }
-
-        var templatesDir = Path.Combine(_tempDir, "templates");
-        Directory.CreateDirectory(templatesDir);
-        File.WriteAllText(Path.Combine(templatesDir, "entity.liquid"), "// {{ entity.Name }}");
-
-        var config = new ProjectConfiguration
-        {
-            Connection = new ConnectionConfig { Provider = "sqlite", ConnectionString = _connString },
-            OutputDir = Path.Combine(_tempDir, "output"),
-            Templates = new Dictionary<string, TemplateConfig>
-            {
-                ["entity"] = new()
-                {
-                    Path = "templates/entity.liquid",
-                    OutputPattern = "{{entity.Name}}.cs",
-                    Scope = "PerModel",
-                    Mode = "Always"
-                    // AppliesTo omitted — should run for all
-                }
-            },
-            Defaults = new DefaultsConfig { Schema = "main", IncludeViews = true }
-        };
-        ProjectConfigurationLoader.Save(Path.Combine(_tempDir, "persistence.project.json"), config);
-
-        var ctx = new ServerContext(_tempDir);
-        IntrospectFirst(ctx);
-        var result = GenerateTool.Execute(ctx);
-        var json = JsonDocument.Parse(result);
-
-        var files = json.RootElement.GetProperty("FilesWritten");
-        files.GetArrayLength().ShouldBe(3); // Products, Categories, ProductSummary
-    }
-
-    [Fact]
-    public void Generate_WhitespaceOnlyOutput_SkippedEmpty()
-    {
-        var ctx = CreateContext(templateContent: "   \n  \t  ");
-        IntrospectFirst(ctx);
-        var result = GenerateTool.Execute(ctx);
-        var json = JsonDocument.Parse(result);
-
-        var files = json.RootElement.GetProperty("FilesWritten");
-        foreach (var file in files.EnumerateArray())
-        {
-            file.GetProperty("Action").GetString().ShouldBe("SkippedEmpty");
-        }
-
-        var summary = json.RootElement.GetProperty("Summary").GetString()!;
-        summary.ShouldContain("skipped");
-
-        // Verify no files were written to disk
-        var outputDir = json.RootElement.GetProperty("OutputDir").GetString()!;
-        if (Directory.Exists(outputDir))
-            Directory.GetFiles(outputDir, "*.cs", SearchOption.AllDirectories).ShouldBeEmpty();
-    }
-
-    [Fact]
-    public void Generate_PerEntityError_ReportsFailedAction()
-    {
-        // Template referencing undefined variable will fail at render time
-        var ctx = CreateContext(templateContent: "{{ undefined_var.missing }}");
-        IntrospectFirst(ctx);
-        var result = GenerateTool.Execute(ctx);
-        var json = JsonDocument.Parse(result);
-
-        var summary = json.RootElement.GetProperty("Summary").GetString()!;
-        summary.ShouldContain("failed");
-    }
-
-    [Fact]
-    public void Generate_SingleFileScope_ProducesOneFile()
-    {
-        var templatesDir = Path.Combine(_tempDir, "templates");
-        Directory.CreateDirectory(templatesDir);
-        File.WriteAllText(Path.Combine(templatesDir, "all.liquid"),
-            "// Tables: {% for e in entities %}{{ e.Name }} {% endfor %}");
-
-        var config = new ProjectConfiguration
-        {
-            Connection = new ConnectionConfig { Provider = "sqlite", ConnectionString = _connString },
-            OutputDir = Path.Combine(_tempDir, "output"),
-            Templates = new Dictionary<string, TemplateConfig>
-            {
-                ["all"] = new()
-                {
-                    Path = "templates/all.liquid",
-                    OutputPattern = "AllEntities.cs",
-                    Scope = "SingleFile",
-                    Mode = "Always"
-                }
-            },
-            Defaults = new DefaultsConfig { Schema = "main" }
-        };
-        ProjectConfigurationLoader.Save(Path.Combine(_tempDir, "persistence.project.json"), config);
-
-        var ctx = new ServerContext(_tempDir);
-        IntrospectFirst(ctx);
-        var result = GenerateTool.Execute(ctx);
-        var json = JsonDocument.Parse(result);
-
-        var files = json.RootElement.GetProperty("FilesWritten");
-        files.GetArrayLength().ShouldBe(1);
-        files[0].GetProperty("Path").GetString().ShouldBe("AllEntities.cs");
-
-        var content = File.ReadAllText(Path.Combine(_tempDir, "output", "AllEntities.cs"));
-        content.ShouldContain("Products");
-        content.ShouldContain("Categories");
-    }
-
-    [Fact]
-    public void Generate_SingleFileScope_WithParameters()
-    {
-        var templatesDir = Path.Combine(_tempDir, "templates");
-        Directory.CreateDirectory(templatesDir);
-        File.WriteAllText(Path.Combine(templatesDir, "all.liquid"),
-            "// Version: {{ parameters.version }}");
-
-        var config = new ProjectConfiguration
-        {
-            Connection = new ConnectionConfig { Provider = "sqlite", ConnectionString = _connString },
-            OutputDir = Path.Combine(_tempDir, "output"),
-            Templates = new Dictionary<string, TemplateConfig>
-            {
-                ["all"] = new()
-                {
-                    Path = "templates/all.liquid",
-                    OutputPattern = "index.cs",
-                    Scope = "SingleFile",
-                    Mode = "Always"
-                }
-            },
-            Defaults = new DefaultsConfig { Schema = "main" }
-        };
-        ProjectConfigurationLoader.Save(Path.Combine(_tempDir, "persistence.project.json"), config);
-
-        var ctx = new ServerContext(_tempDir);
-        IntrospectFirst(ctx);
-        var parameters = new Dictionary<string, object> { ["version"] = "2.0" };
-        var result = GenerateTool.Execute(ctx, parameters: parameters);
-        var json = JsonDocument.Parse(result);
-
-        var content = File.ReadAllText(Path.Combine(_tempDir, "output", "index.cs"));
-        content.ShouldContain("Version: 2.0");
-    }
-
-    [Fact]
-    public void Generate_SingleFileScope_SkipExisting()
-    {
-        var templatesDir = Path.Combine(_tempDir, "templates");
-        Directory.CreateDirectory(templatesDir);
-        File.WriteAllText(Path.Combine(templatesDir, "all.liquid"), "// All entities");
-
-        var config = new ProjectConfiguration
-        {
-            Connection = new ConnectionConfig { Provider = "sqlite", ConnectionString = _connString },
-            OutputDir = Path.Combine(_tempDir, "output"),
-            Templates = new Dictionary<string, TemplateConfig>
-            {
-                ["all"] = new()
-                {
-                    Path = "templates/all.liquid",
-                    OutputPattern = "index.cs",
-                    Scope = "SingleFile",
-                    Mode = "SkipExisting"
-                }
-            },
-            Defaults = new DefaultsConfig { Schema = "main" }
-        };
-        ProjectConfigurationLoader.Save(Path.Combine(_tempDir, "persistence.project.json"), config);
-
-        var ctx = new ServerContext(_tempDir);
-        IntrospectFirst(ctx);
-
-        // First generation creates the file
         GenerateTool.Execute(ctx);
+        File.ReadAllText(Output("Products.cs")).ShouldBe("Id;Name;");
 
-        // Second should skip
-        ctx = new ServerContext(_tempDir);
-        var result = GenerateTool.Execute(ctx);
-        var json = JsonDocument.Parse(result);
+        ctx.Cache.GetModel(ctx.ModelPath)!.Nodes[0].Children.Count.ShouldBe(3);
+    }
 
-        var summary = json.RootElement.GetProperty("Summary").GetString()!;
-        summary.ShouldContain("skipped");
+    // --- nesting ---
+
+    [Fact]
+    public void Generate_HandlesThreeLevelModels()
+    {
+        WriteModel("""
+            {
+              "Name": "Api",
+              "Nodes": [
+                { "Name": "Orders", "Kind": "Resource", "Children": [
+                  { "Name": "Submit", "Kind": "Operation", "Children": [
+                    { "Name": "CustomerId", "Kind": "Parameter", "Type": "string" }
+                  ]}
+                ]}
+              ]
+            }
+            """);
+
+        GenerateTool.Execute(CreateContext("""
+            {%- macro DefaultResource(r) %}R:{{ r.Name }}{%- endmacro %}
+            {%- macro DefaultOperation(o) %}O:{{ o.Name }}{%- endmacro %}
+            {%- macro DefaultParameter(p) %}P:{{ p.Name }}:{{ p.Type }}{%- endmacro %}
+            {%- dispatch item %}
+            {%- for o in item.Children %}{% dispatch o %}
+            {%- for p in o.Children %}{% dispatch p %}{% endfor %}
+            {%- endfor %}
+            """));
+
+        File.ReadAllText(Output("Orders.cs")).Trim()
+            .ShouldBe("R:OrdersO:SubmitP:CustomerId:string");
     }
 
     [Fact]
-    public void Generate_SingleFileScope_Error()
+    public void Generate_DeepOverridePathReachesNestedNodes()
     {
-        var templatesDir = Path.Combine(_tempDir, "templates");
-        Directory.CreateDirectory(templatesDir);
-        File.WriteAllText(Path.Combine(templatesDir, "all.liquid"),
-            "{{ undefined_var.missing }}");
-
-        var config = new ProjectConfiguration
-        {
-            Connection = new ConnectionConfig { Provider = "sqlite", ConnectionString = _connString },
-            OutputDir = Path.Combine(_tempDir, "output"),
-            Templates = new Dictionary<string, TemplateConfig>
+        WriteModel("""
             {
-                ["all"] = new()
-                {
-                    Path = "templates/all.liquid",
-                    OutputPattern = "index.cs",
-                    Scope = "SingleFile",
-                    Mode = "Always"
-                }
-            },
-            Defaults = new DefaultsConfig { Schema = "main" }
-        };
-        ProjectConfigurationLoader.Save(Path.Combine(_tempDir, "persistence.project.json"), config);
+              "Nodes": [
+                { "Name": "Orders", "Kind": "Resource", "Children": [
+                  { "Name": "Submit", "Kind": "Operation", "Children": [
+                    { "Name": "CustomerId", "Kind": "Parameter" },
+                    { "Name": "Secret", "Kind": "Parameter" }
+                  ]}
+                ]}
+              ]
+            }
+            """);
 
-        var ctx = new ServerContext(_tempDir);
-        IntrospectFirst(ctx);
-        var result = GenerateTool.Execute(ctx);
-        var json = JsonDocument.Parse(result);
+        GenerateTool.Execute(CreateContext(
+            "{% for o in item.Children %}{% for p in o.Children %}{{ p.Name }};{% endfor %}{% endfor %}",
+            overrides: [new OverrideConfig { Path = "**/Secret", Artifact = "entity", Ignore = true }]));
 
-        var summary = json.RootElement.GetProperty("Summary").GetString()!;
-        summary.ShouldContain("failed");
-    }
-
-    [Fact]
-    public void Generate_SingleFileScope_Overwrite()
-    {
-        var templatesDir = Path.Combine(_tempDir, "templates");
-        Directory.CreateDirectory(templatesDir);
-        File.WriteAllText(Path.Combine(templatesDir, "all.liquid"), "// All entities v1");
-
-        var config = new ProjectConfiguration
-        {
-            Connection = new ConnectionConfig { Provider = "sqlite", ConnectionString = _connString },
-            OutputDir = Path.Combine(_tempDir, "output"),
-            Templates = new Dictionary<string, TemplateConfig>
-            {
-                ["all"] = new()
-                {
-                    Path = "templates/all.liquid",
-                    OutputPattern = "index.cs",
-                    Scope = "SingleFile",
-                    Mode = "Always"
-                }
-            },
-            Defaults = new DefaultsConfig { Schema = "main" }
-        };
-        ProjectConfigurationLoader.Save(Path.Combine(_tempDir, "persistence.project.json"), config);
-
-        var ctx = new ServerContext(_tempDir);
-        IntrospectFirst(ctx);
-
-        // First generation creates the file
-        GenerateTool.Execute(ctx);
-        File.Exists(Path.Combine(_tempDir, "output", "index.cs")).ShouldBeTrue();
-
-        // Update template and regenerate — should overwrite
-        File.WriteAllText(Path.Combine(templatesDir, "all.liquid"), "// All entities v2");
-        ctx = new ServerContext(_tempDir);
-        var result = GenerateTool.Execute(ctx);
-        var json = JsonDocument.Parse(result);
-
-        var summary = json.RootElement.GetProperty("Summary").GetString()!;
-        summary.ShouldContain("written");
-
-        var content = File.ReadAllText(Path.Combine(_tempDir, "output", "index.cs"));
-        content.ShouldContain("v2");
+        File.ReadAllText(Output("Orders.cs")).ShouldBe("CustomerId;");
     }
 }

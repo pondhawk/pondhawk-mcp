@@ -1,15 +1,14 @@
 {
-  "Connection": {
-    "Provider": "sqlserver",
-    "ConnectionString": "${DB_CONNECTION}"
-  },
-  "OutputDir": "src/Data",
-  "Templates": {
-    "entity": {
-      "Path": "templates/entity.liquid",
-      "OutputPattern": "Entities/{{entity.Name}}.cs",
-      "Scope": "PerModel",
-      "Mode": "Always"
+    "OutputDir": "src/Generated",
+    "Templates": {
+        "entity": {
+            "Path": "templates/entity.liquid",
+            "OutputPattern": "{{ item.Name }}.cs",
+            "Scope": "PerItem",
+            "Mode": "Always"
+        }
+    },
+    "Values": {
+        "Stamp": "${BUILD_STAMP}"
     }
-  }
 }

@@ -9,9 +9,9 @@ public static class ProjectConfigurationSchema
     public const string SchemaJson = """
         {
           "$schema": "https://json-schema.org/draft/2020-12/schema",
-          "$id": "https://pondhawk-mcp/persistence.project.schema.json",
-          "title": "pondhawk-mcp Project Configuration",
-          "description": "Configuration file for pondhawk-mcp code generation from database schemas.",
+          "$id": "https://pondhawk-mcp/pondhawk.project.schema.json",
+          "title": "pondhawk Project Configuration",
+          "description": "Configuration for template-driven artifact generation from model.json.",
           "type": "object",
           "properties": {
             "$schema": {
@@ -20,260 +20,106 @@ public static class ProjectConfigurationSchema
             },
             "ProjectName": {
               "type": "string",
-              "description": "Project name used in output file names (DDL SQL, ER diagram). Defaults to 'db-design' if omitted."
+              "description": "Project name, for display purposes."
             },
             "Description": {
               "type": "string",
-              "description": "Optional project description included as a comment in generated DDL."
+              "description": "Free-text description of what this project generates."
             },
-            "Connection": { "$ref": "#/$defs/ConnectionConfig" },
             "OutputDir": {
               "type": "string",
-              "description": "Output directory for generated files, relative to the project directory."
+              "description": "Root directory for generated files, relative to the project directory."
             },
             "Templates": {
               "type": "object",
-              "description": "Named template definitions. Keys are template names.",
-              "additionalProperties": { "$ref": "#/$defs/TemplateConfig" }
+              "description": "Templates to render, keyed by artifact name. The key is the artifact name that overrides target.",
+              "additionalProperties": { "$ref": "#/$defs/TemplateConfig" },
+              "minProperties": 1
             },
-            "Defaults": { "$ref": "#/$defs/DefaultsConfig" },
-            "DataTypes": {
+            "Values": {
               "type": "object",
-              "description": "Named reusable data type definitions.",
-              "additionalProperties": { "$ref": "#/$defs/DataTypeConfig" }
-            },
-            "TypeMappings": {
-              "type": "array",
-              "description": "Database type to CLR/DataType mappings.",
-              "items": { "$ref": "#/$defs/TypeMappingConfig" }
-            },
-            "Relationships": {
-              "type": "array",
-              "description": "Explicit foreign-key relationship definitions that supplement introspected FKs.",
-              "items": { "$ref": "#/$defs/RelationshipConfig" }
+              "description": "Project-wide values available to every template as {{ values.X }}. String values support ${VAR} substitution from .env."
             },
             "Overrides": {
               "type": "array",
-              "description": "Per-class/property overrides for code generation.",
+              "description": "Rules that change how matched nodes render for a given artifact.",
               "items": { "$ref": "#/$defs/OverrideConfig" }
             },
             "Logging": { "$ref": "#/$defs/LoggingConfig" }
           },
+          "required": ["OutputDir", "Templates"],
           "additionalProperties": false,
           "$defs": {
-            "ConnectionConfig": {
-              "type": "object",
-              "description": "Database connection configuration.",
-              "properties": {
-                "Provider": {
-                  "type": "string",
-                  "enum": ["sqlserver", "postgresql", "mysql", "mariadb", "sqlite"],
-                  "description": "Database provider."
-                },
-                "ConnectionString": {
-                  "type": "string",
-                  "description": "Database connection string. Supports ${VAR} substitution from .env."
-                }
-              },
-              "additionalProperties": false
-            },
             "TemplateConfig": {
               "type": "object",
-              "description": "A Liquid template definition.",
               "properties": {
                 "Path": {
                   "type": "string",
-                  "description": "Relative path to the Liquid template file."
+                  "description": "Path to the Liquid template, relative to the project directory."
                 },
                 "OutputPattern": {
                   "type": "string",
-                  "description": "Liquid expression for output file names."
+                  "description": "Liquid expression producing the output path, relative to OutputDir. PerItem templates can use {{ item.Name }}."
                 },
                 "Scope": {
                   "type": "string",
-                  "enum": ["PerModel", "SingleFile"],
-                  "description": "Template scope: PerModel (one file per table) or SingleFile (one file for all)."
+                  "enum": ["PerItem", "Single"],
+                  "description": "PerItem renders once per matching node; Single renders one file for all of them."
                 },
                 "Mode": {
                   "type": "string",
                   "enum": ["Always", "SkipExisting"],
-                  "description": "Write mode: Always (overwrite) or SkipExisting (create only if missing)."
+                  "description": "Always overwrites on every run; SkipExisting writes once and then leaves the file alone."
                 },
                 "AppliesTo": {
                   "type": "string",
-                  "enum": ["Tables", "Views", "All"],
-                  "description": "Filter which model kinds this template runs for: Tables, Views, or All (default when omitted)."
+                  "description": "Restricts this template to top-level nodes of one Kind. Omit or use 'All' to match every node."
                 }
               },
-              "additionalProperties": false
-            },
-            "DefaultsConfig": {
-              "type": "object",
-              "description": "Default values for code generation.",
-              "properties": {
-                "Namespace": {
-                  "type": "string",
-                  "description": "Default namespace for generated code."
-                },
-                "ContextName": {
-                  "type": "string",
-                  "description": "Name of the generated database context class."
-                },
-                "Schema": {
-                  "type": "string",
-                  "description": "Default database schema name."
-                },
-                "IncludeViews": {
-                  "type": "boolean",
-                  "description": "Whether to include database views in generation."
-                },
-                "Include": {
-                  "type": "array",
-                  "items": { "type": "string" },
-                  "description": "Table names to include (whitelist). If set, only these tables are generated."
-                },
-                "Exclude": {
-                  "type": "array",
-                  "items": { "type": "string" },
-                  "description": "Table names to exclude (blacklist)."
-                }
-              },
-              "additionalProperties": false
-            },
-            "DataTypeConfig": {
-              "type": "object",
-              "description": "A reusable data type definition.",
-              "properties": {
-                "ClrType": {
-                  "type": "string",
-                  "description": "CLR type name (e.g., 'decimal', 'string')."
-                },
-                "MaxLength": {
-                  "type": "integer",
-                  "description": "Maximum length constraint."
-                },
-                "DefaultValue": {
-                  "type": "string",
-                  "description": "Default value expression in generated code."
-                }
-              },
-              "additionalProperties": false
-            },
-            "TypeMappingConfig": {
-              "type": "object",
-              "description": "Maps a database type to a CLR type or named DataType.",
-              "properties": {
-                "DbType": {
-                  "type": "string",
-                  "description": "Database type name to match."
-                },
-                "DataType": {
-                  "type": "string",
-                  "description": "Reference to a named DataType definition."
-                },
-                "ClrType": {
-                  "type": "string",
-                  "description": "Direct CLR type override."
-                }
-              },
-              "additionalProperties": false
-            },
-            "RelationshipConfig": {
-              "type": "object",
-              "description": "An explicit foreign-key relationship definition.",
-              "properties": {
-                "DependentTable": {
-                  "type": "string",
-                  "description": "Table that holds the FK column(s)."
-                },
-                "DependentSchema": {
-                  "type": "string",
-                  "description": "Schema of the dependent table."
-                },
-                "DependentColumns": {
-                  "type": "array",
-                  "items": { "type": "string" },
-                  "description": "Column(s) on the dependent table."
-                },
-                "PrincipalTable": {
-                  "type": "string",
-                  "description": "Table being referenced."
-                },
-                "PrincipalSchema": {
-                  "type": "string",
-                  "description": "Schema of the principal table."
-                },
-                "PrincipalColumns": {
-                  "type": "array",
-                  "items": { "type": "string" },
-                  "description": "Column(s) on the principal table (typically the PK)."
-                },
-                "OnDelete": {
-                  "type": "string",
-                  "enum": ["Cascade", "SetNull", "NoAction"],
-                  "description": "Delete behavior. Default: NoAction."
-                }
-              },
-              "required": ["DependentTable", "DependentColumns", "PrincipalTable", "PrincipalColumns"],
+              "required": ["Path", "OutputPattern", "Scope", "Mode"],
               "additionalProperties": false
             },
             "OverrideConfig": {
               "type": "object",
-              "description": "A per-class/property override for code generation.",
               "properties": {
-                "Class": {
+                "Path": {
                   "type": "string",
-                  "description": "Table name or '*' for all tables."
-                },
-                "Property": {
-                  "type": "string",
-                  "description": "Column name for property-level overrides."
+                  "description": "Slash-delimited node path. '*' matches one node, '**' matches any depth: 'Products/Price', '*/CreatedAt', 'Orders/**'."
                 },
                 "Artifact": {
                   "type": "string",
-                  "description": "Template key to limit this override to."
+                  "description": "Template key this rule applies to. Omit to apply it to every template. Required when Variant is set."
                 },
                 "Variant": {
                   "type": "string",
-                  "description": "Macro variant name (requires Artifact)."
-                },
-                "DataType": {
-                  "type": "string",
-                  "description": "Reference to a named DataType definition."
+                  "description": "Macro variant for matched nodes: 'Currency' dispatches a Property node to the CurrencyProperty macro."
                 },
                 "Ignore": {
                   "type": "boolean",
-                  "description": "Set to true to exclude this property from output."
+                  "description": "Drops matched nodes from this artifact."
+                },
+                "Metadata": {
+                  "type": "object",
+                  "description": "Metadata merged onto matched nodes, overwriting keys the model supplied."
                 }
               },
+              "required": ["Path"],
               "additionalProperties": false
             },
             "LoggingConfig": {
               "type": "object",
-              "description": "File-based logging configuration.",
               "properties": {
-                "Enabled": {
-                  "type": "boolean",
-                  "description": "Whether logging is enabled."
-                },
-                "LogPath": {
-                  "type": "string",
-                  "description": "Path to the log file."
-                },
+                "Enabled": { "type": "boolean" },
+                "LogPath": { "type": "string" },
                 "Level": {
                   "type": "string",
-                  "enum": ["Verbose", "Debug", "Information", "Warning", "Error", "Fatal"],
-                  "description": "Minimum log level."
+                  "enum": ["Verbose", "Debug", "Information", "Warning", "Error", "Fatal"]
                 },
                 "RollingInterval": {
                   "type": "string",
-                  "enum": ["Infinite", "Year", "Month", "Day", "Hour", "Minute"],
-                  "description": "How often to roll the log file."
+                  "enum": ["Infinite", "Year", "Month", "Day", "Hour", "Minute"]
                 },
-                "RetainedFileCountLimit": {
-                  "type": "integer",
-                  "description": "Maximum number of log files to retain."
-                }
+                "RetainedFileCountLimit": { "type": "integer", "minimum": 1 }
               },
               "additionalProperties": false
             }

@@ -14,8 +14,8 @@ namespace Pondhawk.Persistence.Mcp;
 public sealed class ServerContext : IDisposable
 {
     public string ProjectDir { get; }
-    public string ConfigPath => Path.Combine(ProjectDir, "persistence.project.json");
-    public string SchemaPath => Path.Combine(ProjectDir, "db-design.json");
+    public string ConfigPath => Path.Combine(ProjectDir, "pondhawk.project.json");
+    public string ModelPath => Path.Combine(ProjectDir, "model.json");
     public TemplateEngine TemplateEngine { get; } = new();
     public TimestampCache Cache { get; }
     public LoggingService LoggingService { get; } = new();
@@ -82,8 +82,7 @@ public sealed class ServerContext : IDisposable
     private string _lastLoggingPath = "";
 
     /// <summary>
-    /// Resolves connection strings using .env file and system environment variables.
-    /// Returns a copy of the config with resolved connection strings.
+    /// Resolves ${VAR} references in config Values from the .env file and the environment.
     /// </summary>
     public ProjectConfiguration ResolveConfig(ProjectConfiguration config)
     {

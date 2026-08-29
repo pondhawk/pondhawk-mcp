@@ -2,7 +2,6 @@ using Pondhawk.Persistence.Core.Models;
 using Pondhawk.Persistence.Core.Rendering;
 using Fluid.Values;
 using Shouldly;
-using Attribute = Pondhawk.Persistence.Core.Models.Attribute;
 
 namespace Pondhawk.Persistence.Core.Tests.Rendering;
 
@@ -10,156 +9,124 @@ public class DispatchTagTests
 {
     private readonly TemplateEngine _engine = new();
 
-    [Fact]
-    public void Dispatch_Model_CallsVariantClassMacro()
+    private string Render(string source, Node node, string artifact = "entity", string variable = "item")
     {
-        var source = """
-            {%- macro DefaultClass(m) %}DEFAULT:{{ m.Name }}{%- endmacro %}
-            {%- macro SoftDeleteClass(m) %}SOFTDELETE:{{ m.Name }}{%- endmacro %}
-            {% dispatch entity %}
-            """;
-
         _engine.TryParse(source, out var template, out var error).ShouldBeTrue(error);
         var ctx = _engine.CreateContext();
-        var model = new Model { Name = "Orders" };
-        model.SetVariant("entity", "SoftDelete");
-        ctx.SetValue("entity", FluidValue.Create(model, ctx.Options));
-        ctx.AmbientValues["ArtifactName"] = "entity";
-
-        var result = _engine.Render(template, ctx).Trim();
-        result.ShouldBe("SOFTDELETE:Orders");
+        ctx.SetValue(variable, FluidValue.Create(node, ctx.Options));
+        ctx.AmbientValues["ArtifactName"] = artifact;
+        return _engine.Render(template, ctx).Trim();
     }
 
     [Fact]
-    public void Dispatch_Model_FallsBackToDefaultClass()
+    public void Dispatch_CallsVariantMacroForKind()
     {
+        var node = new Node { Name = "Orders", Kind = "Class" };
+        node.SetVariant("entity", "SoftDelete");
+
+        Render("""
+            {%- macro DefaultClass(c) %}DEFAULT:{{ c.Name }}{%- endmacro %}
+            {%- macro SoftDeleteClass(c) %}SOFTDELETE:{{ c.Name }}{%- endmacro %}
+            {% dispatch item %}
+            """, node).ShouldBe("SOFTDELETE:Orders");
+    }
+
+    [Fact]
+    public void Dispatch_FallsBackToDefaultForKind()
+    {
+        Render("""
+            {%- macro DefaultClass(c) %}DEFAULT:{{ c.Name }}{%- endmacro %}
+            {% dispatch item %}
+            """, new Node { Name = "Products", Kind = "Class" }).ShouldBe("DEFAULT:Products");
+    }
+
+    [Fact]
+    public void Dispatch_FallsBackWhenVariantMacroIsMissing()
+    {
+        // An override naming a macro that has not been written yet degrades to the
+        // default rather than breaking generation.
+        var node = new Node { Name = "Price", Kind = "Property" };
+        node.SetVariant("entity", "Currency");
+
+        Render("""
+            {%- macro DefaultProperty(p) %}DEFAULT:{{ p.Name }}{%- endmacro %}
+            {% dispatch item %}
+            """, node).ShouldBe("DEFAULT:Price");
+    }
+
+    [Fact]
+    public void Dispatch_KindDrivesMacroName_NotTheCsharpType()
+    {
+        // The same Node type dispatches to a different macro purely because Kind differs,
+        // which is what lets one engine serve arbitrary artifact shapes.
         var source = """
-            {%- macro DefaultClass(m) %}DEFAULT:{{ m.Name }}{%- endmacro %}
-            {% dispatch entity %}
+            {%- macro DefaultOperation(o) %}OP:{{ o.Name }}{%- endmacro %}
+            {%- macro DefaultParameter(p) %}PARAM:{{ p.Name }}{%- endmacro %}
+            {% dispatch item %}
             """;
 
-        _engine.TryParse(source, out var template, out _).ShouldBeTrue();
-        var ctx = _engine.CreateContext();
-        ctx.SetValue("entity", FluidValue.Create(new Model { Name = "Products" }, ctx.Options));
-        ctx.AmbientValues["ArtifactName"] = "entity";
-
-        var result = _engine.Render(template, ctx).Trim();
-        result.ShouldBe("DEFAULT:Products");
+        Render(source, new Node { Name = "Submit", Kind = "Operation" }).ShouldBe("OP:Submit");
+        Render(source, new Node { Name = "CustomerId", Kind = "Parameter" }).ShouldBe("PARAM:CustomerId");
     }
 
     [Fact]
-    public void Dispatch_Attribute_CallsVariantPropertyMacro()
+    public void Dispatch_NestedChildrenDispatchByTheirOwnKind()
     {
-        var source = """
-            {%- macro DefaultProperty(a) %}DEFAULT:{{ a.Name }}{%- endmacro %}
-            {%- macro CurrencyProperty(a) %}CURRENCY:{{ a.Name }}{%- endmacro %}
-            {% dispatch attr %}
-            """;
-
-        _engine.TryParse(source, out var template, out _).ShouldBeTrue();
-        var ctx = _engine.CreateContext();
-        var attr = new Attribute { Name = "Price", ClrType = "decimal" };
-        attr.SetVariant("entity", "Currency");
-        ctx.SetValue("attr", FluidValue.Create(attr, ctx.Options));
-        ctx.AmbientValues["ArtifactName"] = "entity";
-
-        var result = _engine.Render(template, ctx).Trim();
-        result.ShouldBe("CURRENCY:Price");
-    }
-
-    [Fact]
-    public void Dispatch_Attribute_FallsBackToDefaultProperty()
-    {
-        var source = """
-            {%- macro DefaultProperty(a) %}DEFAULT:{{ a.Name }}{%- endmacro %}
-            {% dispatch attr %}
-            """;
-
-        _engine.TryParse(source, out var template, out _).ShouldBeTrue();
-        var ctx = _engine.CreateContext();
-        ctx.SetValue("attr", FluidValue.Create(new Attribute { Name = "Id", ClrType = "int" }, ctx.Options));
-        ctx.AmbientValues["ArtifactName"] = "entity";
-
-        var result = _engine.Render(template, ctx).Trim();
-        result.ShouldBe("DEFAULT:Id");
-    }
-
-    [Fact]
-    public void Dispatch_MacroNotFound_WritesErrorComment()
-    {
-        var source = "{% dispatch entity %}";
-
-        _engine.TryParse(source, out var template, out _).ShouldBeTrue();
-        var ctx = _engine.CreateContext();
-        var model = new Model { Name = "Orders" };
-        model.SetVariant("entity", "Missing");
-        ctx.SetValue("entity", FluidValue.Create(model, ctx.Options));
-        ctx.AmbientValues["ArtifactName"] = "entity";
-
-        var result = _engine.Render(template, ctx).Trim();
-        result.ShouldContain("dispatch error");
-        result.ShouldContain("MissingClass");
-    }
-
-    [Fact]
-    public void Dispatch_View_BehavesLikeTable()
-    {
-        var source = """
-            {%- macro DefaultClass(m) %}CLASS:{{ m.Name }}:{{ m.IsView }}{%- endmacro %}
-            {% dispatch entity %}
-            """;
-
-        _engine.TryParse(source, out var template, out _).ShouldBeTrue();
-        var ctx = _engine.CreateContext();
-        ctx.SetValue("entity", FluidValue.Create(new Model { Name = "ActiveProducts", IsView = true }, ctx.Options));
-        ctx.AmbientValues["ArtifactName"] = "entity";
-
-        var result = _engine.Render(template, ctx).Trim();
-        result.ShouldContain("CLASS:ActiveProducts");
-    }
-
-    [Fact]
-    public void Dispatch_InsideLoop_SingleFile()
-    {
-        var source = """
-            {%- macro DefaultClass(m) %}{{ m.Name }}{%- endmacro %}
-            {%- for e in entities %}
-            {% dispatch e %}
-            {%- endfor %}
-            """;
-
-        _engine.TryParse(source, out var template, out _).ShouldBeTrue();
-        var ctx = _engine.CreateContext();
-        var entities = new List<Model>
+        var node = new Node
         {
-            new() { Name = "Products" },
-            new() { Name = "Orders" }
+            Name = "Orders", Kind = "Resource",
+            Children =
+            [
+                new Node
+                {
+                    Name = "Submit", Kind = "Operation",
+                    Children = [new Node { Name = "CustomerId", Kind = "Parameter" }]
+                }
+            ]
         };
-        ctx.SetValue("entities", FluidValue.Create(entities, ctx.Options));
-        ctx.AmbientValues["ArtifactName"] = "dbcontext";
 
-        var result = _engine.Render(template, ctx).Trim();
-        result.ShouldContain("Products");
-        result.ShouldContain("Orders");
+        Render("""
+            {%- macro DefaultResource(r) %}R:{{ r.Name }}{%- endmacro %}
+            {%- macro DefaultOperation(o) %}O:{{ o.Name }}{%- endmacro %}
+            {%- macro DefaultParameter(p) %}P:{{ p.Name }}{%- endmacro %}
+            {%- dispatch item %}
+            {%- for o in item.Children %}{% dispatch o %}
+            {%- for p in o.Children %}{% dispatch p %}{% endfor %}
+            {%- endfor %}
+            """, node).ShouldBe("R:OrdersO:SubmitP:CustomerId");
     }
 
     [Fact]
-    public void Dispatch_ArtifactNameFromContext()
+    public void Dispatch_VariantIsScopedToArtifact()
     {
+        var node = new Node { Name = "Price", Kind = "Property" };
+        node.SetVariant("entity", "Currency");
+
         var source = """
-            {%- macro DefaultProperty(a) %}DEFAULT{%- endmacro %}
-            {%- macro SpecialProperty(a) %}SPECIAL{%- endmacro %}
-            {% dispatch attr %}
+            {%- macro DefaultProperty(p) %}DEFAULT:{{ p.Name }}{%- endmacro %}
+            {%- macro CurrencyProperty(p) %}CURRENCY:{{ p.Name }}{%- endmacro %}
+            {% dispatch item %}
             """;
 
-        _engine.TryParse(source, out var template, out _).ShouldBeTrue();
-        var ctx = _engine.CreateContext();
-        var attr = new Attribute { Name = "Price" };
-        attr.SetVariant("dto", "Special");
-        ctx.SetValue("attr", FluidValue.Create(attr, ctx.Options));
-        ctx.AmbientValues["ArtifactName"] = "dto";
+        Render(source, node, artifact: "entity").ShouldBe("CURRENCY:Price");
+        Render(source, node, artifact: "dto").ShouldBe("DEFAULT:Price");
+    }
 
-        var result = _engine.Render(template, ctx).Trim();
-        result.ShouldBe("SPECIAL");
+    [Fact]
+    public void Dispatch_MissingMacroEntirely_EmitsAnInlineError()
+    {
+        Render("{% dispatch item %}", new Node { Name = "Orders", Kind = "Class" })
+            .ShouldContain("dispatch error");
+    }
+
+    [Fact]
+    public void Dispatch_NonNodeValue_EmitsAnInlineError()
+    {
+        _engine.TryParse("{% dispatch thing %}", out var template, out _).ShouldBeTrue();
+        var ctx = _engine.CreateContext();
+        ctx.SetValue("thing", FluidValue.Create("just a string", ctx.Options));
+        ctx.AmbientValues["ArtifactName"] = "entity";
+
+        _engine.Render(template, ctx).ShouldContain("dispatch error");
     }
 }

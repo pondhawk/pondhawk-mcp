@@ -1,6 +1,6 @@
 using Fluid;
 using Pondhawk.Persistence.Core.Configuration;
-using Pondhawk.Persistence.Core.Introspection;
+using Pondhawk.Persistence.Core.Models;
 using Pondhawk.Persistence.Core.Rendering;
 
 namespace Pondhawk.Persistence.Core.Caching;
@@ -16,9 +16,9 @@ public sealed class TimestampCache
     private readonly Dictionary<string, DateTime> _templateTimestamps = new();
     private readonly Dictionary<string, IFluidTemplate> _compiledTemplates = new();
 
-    private string? _schemaPath;
-    private DateTime _schemaTimestamp;
-    private List<Models.Model>? _cachedSchema;
+    private string? _modelPath;
+    private DateTime _modelTimestamp;
+    private ModelFile? _cachedModel;
 
     public TimestampCache(TemplateEngine templateEngine)
     {
@@ -37,9 +37,9 @@ public sealed class TimestampCache
             return _cachedConfig;
         }
 
-        // Config changed or first load — invalidate config, templates, and schema
-        // (schema must be invalidated because RelationshipMerger.Merge mutates cached
-        // Model objects; stale merged FKs would persist if config Relationships change)
+        // Config changed or first load — invalidate config, templates, and model. The model
+        // must go too: overrides from config are applied to node metadata, so a cached tree
+        // would carry rules that the edited config no longer declares.
         InvalidateAll();
 
         _configPath = configPath;
@@ -74,76 +74,45 @@ public sealed class TimestampCache
     }
 
     /// <summary>
-    /// Gets cached schema from the db-design.json file, reloading if the file has been modified.
-    /// Returns null if the schema file does not exist.
+    /// Gets the parsed input model, reloading if the file has been modified.
+    /// Returns null when no model file exists yet.
     /// </summary>
-    public List<Models.Model>? GetSchema(string schemaPath)
+    public ModelFile? GetModel(string modelPath)
     {
-        if (!File.Exists(schemaPath))
+        if (!File.Exists(modelPath))
             return null;
 
-        var currentTimestamp = File.GetLastWriteTimeUtc(schemaPath);
+        var currentTimestamp = File.GetLastWriteTimeUtc(modelPath);
 
-        if (_cachedSchema is not null && _schemaPath == schemaPath && _schemaTimestamp == currentTimestamp)
+        if (_cachedModel is not null && _modelPath == modelPath && _modelTimestamp == currentTimestamp)
         {
-            return _cachedSchema;
+            return _cachedModel;
         }
 
-        var json = File.ReadAllText(schemaPath);
-        var schemaFile = SchemaFileMapper.Deserialize(json);
-        _cachedSchema = SchemaFileMapper.ToModels(schemaFile);
-        _schemaPath = schemaPath;
-        _schemaTimestamp = currentTimestamp;
-        return _cachedSchema;
+        _cachedModel = ModelFileLoader.Load(modelPath);
+        _modelPath = modelPath;
+        _modelTimestamp = currentTimestamp;
+        return _cachedModel;
     }
 
     /// <summary>
-    /// Gets the SchemaFile metadata (Database, Provider) from the cached schema file.
-    /// Returns null if the schema file does not exist.
+    /// Writes the model to disk and refreshes the in-memory cache.
     /// </summary>
-    public SchemaFile? GetSchemaFile(string schemaPath)
+    public void SetModel(ModelFile model, string modelPath)
     {
-        if (!File.Exists(schemaPath))
-            return null;
-
-        var json = File.ReadAllText(schemaPath);
-        return SchemaFileMapper.Deserialize(json);
-    }
-
-    /// <summary>
-    /// Writes schema to disk and updates the in-memory cache.
-    /// </summary>
-    public void SetSchema(List<Models.Model> models, string schemaPath, string database, string provider, string? origin = null)
-    {
-        var schemaFile = SchemaFileMapper.ToSchemaFile(models, database, provider, origin: origin, schema_: "./db-design.schema.json");
-        var json = SchemaFileMapper.Serialize(schemaFile);
-
-        var dir = Path.GetDirectoryName(schemaPath);
+        var dir = Path.GetDirectoryName(modelPath);
         if (!string.IsNullOrEmpty(dir))
             Directory.CreateDirectory(dir);
 
-        File.WriteAllText(schemaPath, json, new System.Text.UTF8Encoding(false));
+        ModelFileLoader.Save(modelPath, model);
 
-        _cachedSchema = models;
-        _schemaPath = schemaPath;
-        _schemaTimestamp = File.GetLastWriteTimeUtc(schemaPath);
+        _cachedModel = model;
+        _modelPath = modelPath;
+        _modelTimestamp = File.GetLastWriteTimeUtc(modelPath);
     }
 
     /// <summary>
-    /// Updates the config timestamp after a TypeMappings write-back
-    /// without invalidating the schema cache.
-    /// </summary>
-    public void UpdateConfigTimestampAfterWriteBack(string configPath)
-    {
-        _configTimestamp = File.GetLastWriteTimeUtc(configPath);
-        _configPath = configPath;
-        // Reload the config but do NOT invalidate schema
-        _cachedConfig = ProjectConfigurationLoader.Load(configPath);
-        // Template cache stays intact too — only the config content changed
-    }
-
-    /// <summary>
-    /// Invalidates all caches (config, templates, schema).
+    /// Invalidates all caches (config, templates, model).
     /// </summary>
     public void InvalidateAll()
     {
@@ -152,9 +121,9 @@ public sealed class TimestampCache
         _configTimestamp = default;
         _templateTimestamps.Clear();
         _compiledTemplates.Clear();
-        _cachedSchema = null;
-        _schemaPath = null;
-        _schemaTimestamp = default;
+        _cachedModel = null;
+        _modelPath = null;
+        _modelTimestamp = default;
     }
 
     /// <summary>
@@ -193,8 +162,7 @@ public sealed class TimestampCache
     }
 
     /// <summary>
-    /// Returns whether there is cached schema data.
+    /// Returns whether an input model file exists.
     /// </summary>
-    public bool HasSchema(string schemaPath) => File.Exists(schemaPath);
-
+    public bool HasModel(string modelPath) => File.Exists(modelPath);
 }

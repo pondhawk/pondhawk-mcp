@@ -54,7 +54,6 @@ builder.Services
     })
     .WithStdioServerTransport()
     .WithTools<InitTool>()
-    .WithTools<IntrospectSchemaTool>()
     .WithTools<GenerateTool>()
     .WithTools<ListTemplatesTool>()
     .WithTools<ValidateConfigTool>()
