@@ -1,32 +1,109 @@
-# pondhawk-mcp
+# pondhawk-generation
 
-An MCP (Model Context Protocol) server that enables AI agents to introspect relational database schemas and generate customizable code artifacts using Liquid templates. Built with C# on .NET 10.
+An MCP server that renders Liquid templates against a structured input model and writes the result to disk. Built with C# on .NET 10.
 
-pondhawk-mcp bridges the gap between existing database schemas and modern .NET code by letting developers define their own generation templates as project assets, committed alongside application code. Templates are primarily authored and maintained by AI agents (e.g., Claude) as part of the development workflow.
+It exists for artifacts that must all follow the **same** pattern — a fleet of entities, DTOs, API clients, command handlers, resources — where consistency across the set matters more than any individual file. Every node of a given kind renders through one macro, so changing that macro changes every artifact at once.
 
-## What It Does
+pondhawk knows nothing about databases, or C#, or any particular target. What it generates is determined entirely by the model you write and the templates you author. Templates are primarily authored and maintained by AI agents as part of the development workflow.
 
-- **Schema Introspection** — Connects to SQL Server, PostgreSQL, MySQL/MariaDB, or SQLite databases and reads table/view/column/FK/index metadata into a portable `db-design.json` file
-- **Template-Driven Code Generation** — Renders Liquid templates against schema data to produce EF Core entities, DTOs, DbContext classes, or any other code artifact you define
-- **Design-First DDL Generation** — Generates dialect-specific SQL DDL from a hand-authored `db-design.json` for deploying new databases
-- **Delta Migration Generation** — Diffs `db-design.json` against the last snapshot to produce versioned SQL migration scripts with paired snapshots, ready for deployment with DbUp, Flyway, or similar tools
-- **ER Diagram Generation** — Produces interactive HTML ER diagrams with pan, zoom, drag, and search — no external dependencies
-- **Variant Override System** — Per-class and per-property control over generated code, scoped to individual templates, via a declarative override/macro/dispatch pipeline
+## Why a generator at all
 
-## Supported Databases
+Code generation only earns its keep when there is repetition. A one-off class you write by hand, or have an agent write directly. The moment it is worth generating, there is a list driving a loop — and that list is what pondhawk takes as input.
 
-| Provider | Databases |
-|----------|-----------|
-| Microsoft.Data.SqlClient | SQL Server 2012+, Azure SQL Database, Azure SQL Managed Instance |
-| Npgsql | PostgreSQL 10+, AWS Aurora PostgreSQL, Azure Database for PostgreSQL |
-| MySqlConnector | MySQL 5.7+, MariaDB 10.2+, AWS Aurora MySQL, Azure Database for MySQL |
-| Microsoft.Data.Sqlite | SQLite 3 |
+## The input model
+
+`model.json` holds a tree of nodes. Every node has a `Name` and a `Kind`, and may have `Children`. Everything else you write on a node is metadata, reached from templates as an ordinary member.
+
+```json
+{
+  "Name": "Catalog",
+  "Nodes": [
+    {
+      "Name": "Product",
+      "Kind": "Class",
+      "Children": [
+        { "Name": "Id",    "Kind": "Property", "Type": "int" },
+        { "Name": "Price", "Kind": "Property", "Type": "decimal", "IsNullable": false }
+      ]
+    }
+  ]
+}
+```
+
+`"Type": "decimal"` is read as `{{ p.Type }}` — no `Metadata.` prefix, and the engine never needs to know the shape of your model.
+
+Nodes nest to any depth. Two levels suit a class with properties; three suit a resource whose operations have parameters:
+
+| Artifact | Level 1 | Level 2 | Level 3 |
+|---|---|---|---|
+| Entity | class | property | — |
+| API client | resource | operation | parameter |
+| gRPC service | service | rpc | message field |
+| Command handlers | aggregate | command | field |
+
+You write the model, or an agent does. To generate from an existing database, pair pondhawk with a schema-aware MCP server and have the agent feed one from the other — pondhawk does not connect to databases itself.
+
+## Dispatch
+
+`Kind` selects the macro that renders a node. Write one `Default<Kind>` macro per kind:
+
+```liquid
+{%- macro DefaultClass(c) %}
+public partial class {{ c.Name | pascal_case }}
+{%- endmacro %}
+
+{%- macro DefaultProperty(p) %}
+    public {{ p.Type | type_nullable: p.IsNullable }} {{ p.Name | pascal_case }} { get; set; }
+{%- endmacro %}
+
+{% dispatch item %}
+{
+{%- for p in item.Children %}
+{% dispatch p %}
+{%- endfor %}
+}
+```
+
+`{% dispatch p %}` looks at the node's `Kind` and calls the matching macro. This is the consistency guarantee: every node of a kind goes through one macro.
+
+### Variants
+
+When one node needs to render differently, define a `<Variant><Kind>` macro and point an override at it:
+
+```liquid
+{%- macro CurrencyProperty(p) %}
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal {{ p.Name | pascal_case }} { get; set; }
+{%- endmacro %}
+```
+
+```json
+{ "Path": "Product/Price", "Artifact": "entity", "Variant": "Currency" }
+```
+
+Dispatch falls back to `Default<Kind>` when a variant macro is missing, so an override naming a macro you have not written yet degrades rather than breaking.
+
+## Overrides
+
+Overrides address nodes by path and change how they render for one artifact.
+
+```json
+{ "Path": "Product/Price", "Artifact": "entity", "Variant": "Currency" }
+{ "Path": "*/CreatedAt",   "Artifact": "entity", "Ignore": true }
+{ "Path": "Order/**",      "Artifact": "dto",    "Metadata": { "Access": "internal" } }
+```
+
+- `Path` — slash-delimited. `*` matches one node, `**` matches any depth.
+- `Artifact` — the template key. Required with `Variant`; omit to apply everywhere.
+- `Variant` — the macro variant to render with.
+- `Ignore` — drops matched nodes from that artifact.
+- `Metadata` — merged onto matched nodes, overwriting what the model declared.
+
+When several overrides match one node, the one with the **most literal path segments** wins. Ties go to whichever is listed later, so state the broad rule first and narrow afterwards.
 
 ## Quick Start
 
-### 1. Register the MCP Server
-
-Add pondhawk-mcp to your AI tool's MCP configuration:
+### 1. Register the MCP server
 
 ```json
 {
@@ -39,107 +116,94 @@ Add pondhawk-mcp to your AI tool's MCP configuration:
 }
 ```
 
-### 2. Initialize a Project
-
-Ask your AI agent to call the `init` tool:
+### 2. Scaffold a project
 
 ```
-Initialize pondhawk for a SQL Server database with namespace MyApp.Data
+Initialize a pondhawk project with namespace MyApp.Data
 ```
 
-This creates:
-- `persistence.project.json` — project configuration (single source of truth)
-- `templates/entity.generated.liquid` — working entity template with dispatch macros
-- `templates/entity.stub.liquid` — partial class stub (created once, never overwritten)
-- `AGENTS.md` — comprehensive instructions for AI agents
-- `.env` — database credentials (gitignored)
-- JSON Schema files for IDE autocompletion
+The `init` tool creates `pondhawk.project.json`, a starter `model.json`, example templates, JSON schemas for IDE autocompletion, `AGENTS.md`, and `.env`.
 
-### 3. Introspect Your Database
+### 3. Describe what to generate
+
+Edit `model.json`, then author templates with one `Default<Kind>` macro per kind.
+
+### 4. Generate
 
 ```
-Introspect the database schema
+Validate the config, then generate
 ```
 
-This connects to your database, reads all metadata, writes `db-design.json`, and auto-populates type mappings in your config.
-
-### 4. Generate Code
-
-```
-Generate code for all tables
-```
-
-This renders your Liquid templates against the schema data and writes files to disk. No database connection needed — generation is purely file-driven from `db-design.json`.
+`validate_config` reports unparseable templates, unknown filters, overrides matching no node, and templates whose `AppliesTo` matches no kind in the model — all of which otherwise generate nothing silently.
 
 ## MCP Tools
 
 | Tool | Description |
 |------|-------------|
-| `init` | Scaffolds a new project with config, templates, AGENTS.md, and .env |
-| `introspect_schema` | Reads database schema into `db-design.json` and auto-populates type mappings |
-| `generate` | Renders Liquid templates against schema data and writes generated files |
-| `generate_ddl` | Generates dialect-specific DDL SQL from `db-design.json` |
-| `generate_migration` | Generates versioned delta migration SQL by diffing `db-design.json` against the last snapshot |
-| `generate_diagram` | Generates an interactive HTML ER diagram from `db-design.json` |
-| `list_templates` | Lists all configured templates with their settings |
-| `validate_config` | Validates project configuration without a database connection |
+| `init` | Scaffolds a new project with config, model, templates, schemas, and AGENTS.md |
+| `generate` | Renders templates against `model.json` and writes files |
+| `list_templates` | Lists configured templates with their settings |
+| `validate_config` | Checks config, templates, and model without generating |
 | `update` | Refreshes AGENTS.md and JSON schemas after a server upgrade |
 
-## How It Works
+## Configuration
 
-### Partial Class Strategy
+All settings live in `pondhawk.project.json`:
 
-Each entity produces two files:
-
-| File | Purpose | Overwrite Behavior |
-|------|---------|-------------------|
-| `Product.generated.cs` | Generated code from schema | Always overwritten |
-| `Product.cs` | Developer stub for custom code | Only created if missing |
-
-Developers extend entities in the stub file with custom logic, computed properties, and validation — these are never overwritten on regeneration.
-
-### Variant Override System
-
-The variant system provides precise control over generated code for specific classes and properties, scoped to individual templates:
-
-**1. Define overrides** in `persistence.project.json`:
 ```json
 {
-  "Overrides": [
-    { "Class": "*", "Property": "CreatedAt", "Artifact": "entity", "Variant": "AuditTimestamp" },
-    { "Class": "Products", "Property": "Price", "Artifact": "entity", "Variant": "Currency" },
-    { "Class": "Orders", "Artifact": "entity", "Variant": "SoftDelete" }
-  ]
+  "$schema": "./pondhawk.project.schema.json",
+  "OutputDir": "src/Generated",
+  "Templates": {
+    "entity": {
+      "Path": "templates/entity.generated.liquid",
+      "OutputPattern": "{{ item.Name | pascal_case }}.generated.cs",
+      "Scope": "PerItem",
+      "Mode": "Always",
+      "AppliesTo": "Class"
+    },
+    "entity-stub": {
+      "Path": "templates/entity.stub.liquid",
+      "OutputPattern": "{{ item.Name | pascal_case }}.cs",
+      "Scope": "PerItem",
+      "Mode": "SkipExisting",
+      "AppliesTo": "Class"
+    }
+  },
+  "Values": { "Namespace": "MyApp.Data" },
+  "Overrides": [],
+  "Logging": { "Enabled": false }
 }
 ```
 
-**2. Define macros** in Liquid templates:
-```liquid
-{%- macro DefaultProperty(a) %}
-    public {{ a.ClrType | type_nullable: a.IsNullable }} {{ a.Name | pascal_case }} { get; set; }
-{%- endmacro %}
+- **Scope** — `PerItem` renders one file per matching node; `Single` renders one file for all.
+- **Mode** — `Always` overwrites every run; `SkipExisting` writes once and then leaves the file alone.
+- **AppliesTo** — restricts a template to top-level nodes of one `Kind`. Omit for all.
+- **Values** — anything templates need, as `{{ values.X }}`. String values support `${VAR}` substitution from `.env`.
 
-{%- macro CurrencyProperty(a) %}
-    [Column(TypeName = "decimal(18,2)")]
-    public decimal {{ a.Name | pascal_case }} { get; set; }
-{%- endmacro %}
+### The two-file pattern
 
-{%- macro AuditTimestampProperty(a) %}
-    [DatabaseGenerated(DatabaseGeneratedOption.Computed)]
-    public DateTime {{ a.Name | pascal_case }} { get; set; }
-{%- endmacro %}
-```
+Pair an `Always` template with a `SkipExisting` one to separate generated code from hand-written code:
 
-**3. Dispatch automatically** resolves and calls the right macro:
-```liquid
-{%- for a in entity.Attributes %}
-{% dispatch a %}
-{%- endfor %}
-```
+| File | Purpose | Overwrite |
+|------|---------|-----------|
+| `Product.generated.cs` | Generated from the model | Always |
+| `Product.cs` | Developer's own code | Only created if missing |
 
-The same property can have different variants for different templates — `Products.Price` renders as `Currency` in the entity template but `FormattedCurrency` in the DTO template.
+In C# these are `partial class` halves; other languages have their own equivalents.
 
-### Custom Liquid Filters
+## Template Context
+
+| Variable | Contents |
+|----------|----------|
+| `item` | The current node (`PerItem` scope) |
+| `items` | All matching nodes (`Single` scope) |
+| `model` | The model root — `{{ model.Name }}` plus root metadata |
+| `values` | The `Values` section of the config |
+| `config` | The project configuration |
+| `parameters` | Key-values passed to the `generate` call |
+
+### Custom Filters
 
 | Filter | Example | Output |
 |--------|---------|--------|
@@ -148,96 +212,37 @@ The same property can have different variants for different templates — `Produ
 | `snake_case` | `{{ "OrderItem" \| snake_case }}` | `order_item` |
 | `pluralize` | `{{ "Category" \| pluralize }}` | `Categories` |
 | `singularize` | `{{ "Categories" \| singularize }}` | `Category` |
-| `type_nullable` | `{{ a.ClrType \| type_nullable: a.IsNullable }}` | `int?` |
+| `type_nullable` | `{{ p.Type \| type_nullable: p.IsNullable }}` | `int?` |
 
-### Design-First Workflow
+Plus Liquid's built-ins, via [Fluid](https://github.com/sebastienros/fluid).
 
-For new databases, the AI agent writes `db-design.json` directly with `"Origin": "design"`, then:
+## Example: a non-C# artifact
 
-```
-Generate DDL for PostgreSQL    →  db-design.postgresql.sql
-Generate an ER diagram         →  db-design.html
-```
-
-Both tools work with any `db-design.json` — introspected or hand-designed.
-
-### Migrations Workflow
-
-For evolving an existing schema, edit `db-design.json` and generate delta migrations:
-
-```
-Add a DisplayName column to Users    →  generate_migration "add display name"
-```
-
-This diffs `db-design.json` against the last snapshot and produces:
-
-```
-migrations/
-  V001__initial_schema.sql        ← CREATE TABLE statements (bootstrap)
-  V001__initial_schema.json       ← snapshot of db-design.json at V001
-  V002__add_display_name.sql      ← ALTER TABLE ADD COLUMN (delta)
-  V002__add_display_name.json     ← snapshot at V002
-```
-
-Each `.sql` file contains numbered, commented statements ready for deployment with DbUp, Flyway, or similar migration runners. The paired `.json` snapshot serves as the baseline for the next migration — no database connection or git history required.
-
-The tool detects 12 change types (table add/remove, column add/remove/modify, index add/remove/modify, FK add/remove/modify, PK modify) and emits warnings for destructive operations, possible renames, and data loss.
-
-Use `dryRun: true` to preview changes without writing files.
-
-## Project Configuration
-
-All settings live in a single `persistence.project.json` file:
+A three-level model producing TypeScript API clients:
 
 ```json
 {
-  "Connection": {
-    "Provider": "sqlserver",
-    "ConnectionString": "${DB_CONNECTION}"
-  },
-  "OutputDir": "src/Data",
-  "Templates": {
-    "entity": {
-      "Path": "templates/entity.generated.liquid",
-      "OutputPattern": "Entities/{{entity.Name | pascal_case}}.generated.cs",
-      "Scope": "PerModel",
-      "Mode": "Always"
-    },
-    "entity-stub": {
-      "Path": "templates/entity.stub.liquid",
-      "OutputPattern": "Entities/{{entity.Name | pascal_case}}.cs",
-      "Scope": "PerModel",
-      "Mode": "SkipExisting"
-    }
-  },
-  "Defaults": {
-    "Namespace": "MyApp.Data",
-    "ContextName": "MyApp",
-    "Schema": "dbo",
-    "IncludeViews": false,
-    "Include": ["Products", "Categories", "Orders*"],
-    "Exclude": ["__EFMigrationsHistory"]
-  },
-  "DataTypes": {
-    "Uid": { "ClrType": "string", "MaxLength": 28, "DefaultValue": "Ulid.NewUlid()" }
-  },
-  "TypeMappings": [
-    { "DbType": "char(28)", "DataType": "Uid" }
-  ],
-  "Relationships": [
-    {
-      "DependentTable": "Products",
-      "DependentColumns": ["CategoryId"],
-      "PrincipalTable": "Categories",
-      "PrincipalColumns": ["Id"]
-    }
-  ],
-  "Overrides": [],
-  "Logging": { "Enabled": false }
+  "Name": "BillingApi",
+  "BaseUrl": "https://api.example.com/v1",
+  "Nodes": [
+    { "Name": "Invoices", "Kind": "Resource", "Route": "/invoices", "Children": [
+      { "Name": "list", "Kind": "Operation", "Verb": "GET", "Returns": "Invoice[]", "Children": [
+        { "Name": "page", "Kind": "Parameter", "Type": "number", "Required": false }
+      ]}
+    ]}
+  ]
 }
 ```
 
-Connection strings support `${VAR}` substitution from `.env` files or system environment variables.
+```typescript
+export class InvoicesClient {
+  async list(page?: number): Promise<Invoice[]> {
+    return request("GET", BASE + "/invoices");
+  }
+}
+```
+
+Same engine, same dispatch, no C# and no database anywhere in sight.
 
 ## Building from Source
 
@@ -264,8 +269,6 @@ dotnet run --project tests/Pondhawk.Generation.Tests --configuration Release
 dotnet run --project tests/Pondhawk.Generation.Mcp.Tests --configuration Release
 ```
 
-All tests run without external database servers — SQLite in-memory databases are used for introspection and pipeline tests.
-
 ### Published Binaries
 
 The `Publish` target produces self-contained single-file executables (no .NET runtime required):
@@ -280,41 +283,36 @@ The `Publish` target produces self-contained single-file executables (no .NET ru
 ## Architecture
 
 ```
-┌─────────────┐       stdio        ┌──────────────────────────────┐
-│  AI Agent   │◄───────────────────►│        pondhawk-mcp           │
+┌─────────────┐       stdio         ┌──────────────────────────────┐
+│  AI Agent   │◄───────────────────►│   pondhawk-generation-mcp    │
 │ (Claude,    │   MCP Protocol      │                              │
 │  Copilot)   │                     │  ┌────────────────────────┐  │
 └─────────────┘                     │  │     MCP Tool Layer     │  │
                                     │  └───────────┬────────────┘  │
-                                    │              │               │
                                     │  ┌───────────┴────────────┐  │
-                                    │  │   Schema Introspection │  │
-                                    │  │       Engine           │  │
+                                    │  │   Model Loader         │  │
+                                    │  │   model.json → Nodes   │  │
                                     │  └───────────┬────────────┘  │
-                                    │              │               │
                                     │  ┌───────────┴────────────┐  │
-                                    │  │   Template Rendering   │  │
-                                    │  │     Engine (Fluid)     │  │
+                                    │  │   Override Resolver    │  │
+                                    │  │   paths → variants     │  │
                                     │  └───────────┬────────────┘  │
-                                    │              │               │
+                                    │  ┌───────────┴────────────┐  │
+                                    │  │   Template Engine      │  │
+                                    │  │   Fluid + dispatch     │  │
+                                    │  └───────────┬────────────┘  │
                                     │  ┌───────────┴────────────┐  │
                                     │  │   File Writer          │  │
                                     │  └────────────────────────┘  │
-                                    └──────────────┬───────────────┘
-                                                   │
-                                    ┌──────────────┴───────────────┐
-                                    │     Target Databases         │
-                                    │  SQL Server │ PostgreSQL     │
-                                    │  MySQL      │ SQLite         │
                                     └──────────────────────────────┘
 ```
 
-The solution is split into two projects:
+Two projects:
 
-- **Pondhawk.Generation** — Class library with all core functionality (schema introspection, template rendering, DDL generation, migration generation, diagram generation, caching, logging)
-- **Pondhawk.Generation.Mcp** — Thin MCP server layer that wraps core library methods as MCP tools
+- **Pondhawk.Generation** — the engine: model loading, override resolution, template rendering, file writing, caching, logging
+- **Pondhawk.Generation.Mcp** — a thin MCP server wrapping the engine as tools
 
-This separation allows the core library to be reused by other modalities (e.g., a CLI tool) without depending on MCP.
+The split keeps the engine modality-agnostic, so a CLI can sit beside the MCP server without duplicating it.
 
 ## Technology Stack
 
@@ -323,9 +321,9 @@ This separation allows the core library to be reused by other modalities (e.g., 
 | Runtime | .NET 10, C# 13 |
 | MCP SDK | ModelContextProtocol |
 | Template Engine | Fluid |
-| DB Introspection | DatabaseSchemaReader |
 | Configuration | System.Text.Json |
-| Logging | Serilog + Serilog.Sinks.File + Serilog.Extensions.Logging |
+| Schema Validation | JsonSchema.Net |
+| Logging | Serilog |
 | Build System | Cake Frosting |
 | Test Framework | xUnit v3 + Shouldly + NSubstitute |
 | Transport | stdio |
@@ -334,4 +332,4 @@ This separation allows the core library to be reused by other modalities (e.g., 
 
 This project is licensed under the [GNU General Public License v3.0](LICENSE).
 
-**Note:** The GPL applies to the pondhawk-mcp tool itself. Code generated by the tool from your templates and schemas is your own and is not covered by this license.
+**Note:** The GPL applies to the pondhawk-generation tool itself. Code generated by the tool from your templates and models is your own and is not covered by this license.

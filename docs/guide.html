@@ -104,18 +104,19 @@
 <body>
 <div class="container">
 
-<h1>pondhawk-generation-mcp<small>Database introspection, code generation, design-first DDL &amp; migrations via MCP</small></h1>
+<h1>pondhawk-generation-mcp<small>Template-driven artifact generation via MCP</small></h1>
 
 <nav>
   <ul>
     <li><a href="#what-is-mcp">What is MCP?</a></li>
-    <li><a href="#what-is-pondhawk">What is pondhawk-generation-mcp?</a></li>
+    <li><a href="#what-is-pondhawk">What is pondhawk-generation?</a></li>
     <li><a href="#installation">Installation</a></li>
     <li><a href="#registering">Registering in Claude Code</a></li>
     <li><a href="#getting-started">Getting Started</a></li>
+    <li><a href="#model">The Input Model</a></li>
+    <li><a href="#templates">Templates &amp; Dispatch</a></li>
+    <li><a href="#overrides">Overrides</a></li>
     <li><a href="#tools">Available Tools</a></li>
-    <li><a href="#design-first">Design-First Pipeline</a></li>
-    <li><a href="#migrations">Migrations</a></li>
     <li><a href="#configuration">Configuration Reference</a></li>
     <li><a href="#env">Environment Variables</a></li>
     <li><a href="#tips">Tips</a></li>
@@ -132,622 +133,349 @@
   generate artifacts on behalf of the user.
 </p>
 <p>
-  Each tool has a name, a description, and a typed parameter schema. The AI reads
-  these descriptions, decides which tool to call, and passes the correct arguments.
-  The tool executes locally on your machine and returns a result that the AI
-  incorporates into its response.
+  An MCP server is an ordinary program. It is launched by the AI tool, communicates over
+  standard input and output, and advertises the tools it provides. Servers are composable:
+  an agent can call one server to gather information and hand the result to another.
 </p>
 
 <!-- ───────────────────── What is pondhawk? ───────────────────── -->
-<h2 id="what-is-pondhawk">What is pondhawk-generation-mcp?</h2>
+<h2 id="what-is-pondhawk">What is pondhawk-generation?</h2>
 <p>
-  <strong>pondhawk-generation-mcp</strong> is an MCP server that gives Claude the
-  ability to introspect relational database schemas, generate code using
-  <a href="https://shopify.github.io/liquid/">Liquid</a> templates, produce
-  dialect-specific DDL SQL, generate versioned delta migration scripts, and create
-  interactive ER diagrams. It supports
-  SQL Server, PostgreSQL, MySQL, MariaDB, and SQLite.
+  <strong>pondhawk-generation</strong> renders Liquid templates against a structured input
+  model and writes the result to disk. It exists for artifacts that must all follow the
+  <strong>same</strong> pattern — a fleet of entities, DTOs, API clients, command handlers,
+  resources — where consistency across the whole set matters more than any individual file.
 </p>
-<p>It supports two complementary workflows:</p>
-<ul>
-  <li><strong>Database-first</strong> — Introspect an existing database into <code>db-design.json</code>, then generate C# code via Liquid templates.</li>
-  <li><strong>Design-first</strong> — Author <code>db-design.json</code> by hand to design a new schema, then generate DDL SQL, delta migrations, and ER diagrams.</li>
-</ul>
-<p>Typical things you can generate include:</p>
-<ul>
-  <li>Entity / model classes</li>
-  <li>Data-access repositories</li>
-  <li>Dialect-specific DDL SQL (CREATE TABLE, CREATE VIEW, indexes, foreign keys, enums)</li>
-  <li>Versioned delta migration scripts (ALTER TABLE, DROP/CREATE INDEX, etc.)</li>
-  <li>Interactive HTML ER diagrams</li>
-  <li>API DTOs or mapping code</li>
-  <li>Any text artifact you can express as a Liquid template</li>
-</ul>
+<p>
+  It knows nothing about databases, or C#, or any particular target. What gets generated is
+  determined entirely by the model you write and the templates you author.
+</p>
+<div class="tip">
+  <strong>Why a generator at all?</strong> Code generation only earns its keep when there is
+  repetition. A one-off class you write by hand. The moment it is worth generating, there is a
+  list driving a loop — and that list is what pondhawk takes as input.
+</div>
+<p>
+  To generate from an existing database, pair pondhawk with a schema-aware MCP server and let
+  the agent feed one from the other. pondhawk does not connect to databases itself.
+</p>
 
 <!-- ───────────────────── Installation ───────────────────── -->
 <h2 id="installation">Installation</h2>
 <p>
-  The application ships as a self-contained, single-file executable — no .NET runtime
-  required. To install:
+  Download the binary for your platform from the releases page. It is self-contained — no
+  .NET runtime required.
 </p>
-<ol>
-  <li>Copy the executable to a permanent location on your machine.</li>
-  <li>
-    Either add that location to your <code>PATH</code> environment variable, or
-    reference the executable by its full absolute path when registering it as an MCP
-    server.
-  </li>
-</ol>
+<table>
+  <thead><tr><th>Platform</th><th>Asset</th></tr></thead>
+  <tbody>
+    <tr><td>Windows x64</td><td><code>pondhawk-generation-mcp-win.exe</code></td></tr>
+    <tr><td>macOS ARM64</td><td><code>pondhawk-generation-mcp-osx</code></td></tr>
+    <tr><td>Linux x64</td><td><code>pondhawk-generation-mcp-linux</code></td></tr>
+    <tr><td>Linux ARM64</td><td><code>pondhawk-generation-mcp-linux-arm</code></td></tr>
+  </tbody>
+</table>
+<p>On macOS and Linux, make it executable and put it somewhere on your <code>PATH</code>:</p>
+<pre><code>chmod +x pondhawk-generation-mcp-linux
+sudo mv pondhawk-generation-mcp-linux /usr/local/bin/pondhawk-generation-mcp</code></pre>
 
 <!-- ───────────────────── Registering ───────────────────── -->
 <h2 id="registering">Registering in Claude Code</h2>
 
 <h3>Option A — CLI</h3>
-<p>Run the following command in your terminal:</p>
-<pre><code>claude mcp add pondhawk pondhawk-generation-mcp -- --project C:/projects/my-app</code></pre>
-<p>
-  Replace <code>C:/projects/my-app</code> with the path to the directory that
-  contains (or will contain) your <code>persistence.project.json</code>.
-</p>
+<pre><code>claude mcp add pondhawk -- pondhawk-generation-mcp --project /path/to/your/project</code></pre>
 
 <h3>Option B — Manual JSON config</h3>
-<p>
-  Add an entry to your Claude configuration file
-  (<code>~/.claude/claude_desktop_config.json</code>):
-</p>
 <pre><code>{
   "mcpServers": {
     "pondhawk": {
       "command": "pondhawk-generation-mcp",
-      "args": ["--project", "C:/projects/my-app"]
+      "args": ["--project", "/path/to/your/project"]
     }
   }
 }</code></pre>
 <p>
-  If the executable is not on your <code>PATH</code>, use the full path to the
-  binary in the <code>"command"</code> field.
+  The <code>--project</code> argument points at the directory holding
+  <code>pondhawk.project.json</code>. The server reads and writes only inside that directory.
 </p>
 
 <!-- ───────────────────── Getting Started ───────────────────── -->
 <h2 id="getting-started">Getting Started</h2>
-<p>Once registered, open a Claude conversation and walk through these steps:</p>
-
 <ol class="steps">
-  <li>
-    <span class="step-number">1</span>
-    <div>
-      <strong>Initialize the project</strong> — Ask Claude to run the
-      <code>init</code> tool. This creates a <code>persistence.project.json</code>
-      configuration file, JSON Schema files (<code>persistence.project.schema.json</code>
-      and <code>db-design.schema.json</code>) for IDE autocompletion, starter Liquid
-      templates, a <code>.env</code> file for credentials, and an <code>AGENTS.md</code>
-      instruction file.
-    </div>
-  </li>
-  <li>
-    <span class="step-number">2</span>
-    <div>
-      <strong>Set the connection string</strong> — Open the <code>.env</code> file
-      and replace the placeholder with your real database connection string. Keep this
-      file out of version control.
-    </div>
-  </li>
-  <li>
-    <span class="step-number">3</span>
-    <div>
-      <strong>Introspect the schema</strong> — Ask Claude to run
-      <code>introspect_schema</code>. This reads the connection from your config,
-      introspects the database, and writes a <code>db-design.json</code> file containing
-      the introspected metadata about your tables, columns, keys, and indexes.
-      This file only contains what is actually in the database.
-    </div>
-  </li>
-  <li>
-    <span class="step-number">4</span>
-    <div>
-      <strong>Generate code</strong> — Ask Claude to run <code>generate</code>.
-      Templates are rendered against the <code>db-design.json</code> data, merged with
-      any explicit <code>Relationships</code> from your config, and output files are
-      written to the configured <code>OutputDir</code>. No live database connection
-      is needed for this step.
-    </div>
-  </li>
+  <li><span class="step-number">1</span><div>
+    <strong>Scaffold the project.</strong> Ask the agent to run <code>init</code>. You get
+    <code>pondhawk.project.json</code>, a starter <code>model.json</code>, two example
+    templates, JSON schemas for editor autocompletion, <code>AGENTS.md</code>, and
+    <code>.env</code>.
+  </div></li>
+  <li><span class="step-number">2</span><div>
+    <strong>Describe what to generate.</strong> Edit <code>model.json</code> so it lists the
+    things you want files for.
+  </div></li>
+  <li><span class="step-number">3</span><div>
+    <strong>Author the templates.</strong> One <code>Default&lt;Kind&gt;</code> macro per kind
+    of node in your model.
+  </div></li>
+  <li><span class="step-number">4</span><div>
+    <strong>Validate.</strong> <code>validate_config</code> catches unparseable templates,
+    unknown filters, overrides that match no node, and templates that would generate nothing.
+  </div></li>
+  <li><span class="step-number">5</span><div>
+    <strong>Generate.</strong> <code>generate</code> renders every template and writes the
+    files. Read one of them before declaring victory.
+  </div></li>
 </ol>
 
-<div class="tip">
-  After any manual edits to <code>persistence.project.json</code>, ask Claude to run
-  <code>validate_config</code> to catch errors before generating.
-</div>
-
-<div class="tip">
-  After upgrading pondhawk-mcp, ask Claude to run <code>update</code> on existing
-  projects. This refreshes <code>AGENTS.md</code>,
-  <code>persistence.project.schema.json</code>, and
-  <code>db-design.schema.json</code> so Claude knows about new features
-  and IDE autocompletion stays current. All existing configuration is preserved.
-</div>
-
-<!-- ───────────────────── Available Tools ───────────────────── -->
-<h2 id="tools">Available Tools</h2>
-
-<div class="card-grid">
-
-  <div class="card">
-    <h4>init</h4>
-    <p>Creates a skeleton <code>persistence.project.json</code>, a <code>persistence.project.schema.json</code> for IDE support, starter Liquid templates, a <code>.env</code> file for database credentials, and an <code>AGENTS.md</code> file in the project directory.</p>
-    <div class="params">
-      <span>provider</span> <span>namespace</span> <span>connectionString?</span>
-    </div>
-  </div>
-
-  <div class="card">
-    <h4>introspect_schema</h4>
-    <p>Introspects the project's database connection, writes the introspected schema to <code>db-design.json</code> with <code>"Origin": "introspected"</code>, and returns a lightweight summary. View SQL definitions are captured when <code>includeViews</code> is enabled. Refuses to overwrite if the existing file has <code>"Origin": "design"</code>.</p>
-    <div class="params">
-      <span>schemas?</span> <span>include?</span> <span>exclude?</span> <span>includeViews?</span>
-    </div>
-  </div>
-
-  <div class="card">
-    <h4>generate</h4>
-    <p>Generates code by rendering Liquid templates against <code>db-design.json</code> data, merged with explicit <code>Relationships</code> from config, and writes generated files to disk. Run <code>introspect_schema</code> first.</p>
-    <div class="params">
-      <span>templates?</span> <span>models?</span> <span>schemas?</span> <span>includeViews?</span> <span>parameters?</span>
-    </div>
-  </div>
-
-  <div class="card">
-    <h4>generate_ddl</h4>
-    <p>Generates dialect-specific DDL SQL from <code>db-design.json</code> and writes it to a file. Supports SQL Server, PostgreSQL, MySQL, and SQLite. Handles enums, indexes, foreign keys, views (<code>CREATE VIEW</code> from <code>SelectSql</code>), and auto-generated constraint names.</p>
-    <div class="params">
-      <span>provider</span> <span>output?</span>
-    </div>
-  </div>
-
-  <div class="card">
-    <h4>generate_diagram</h4>
-    <p>Generates a self-contained interactive HTML ER diagram from <code>db-design.json</code>. The diagram includes table boxes, FK relationship lines, enum boxes, and supports pan, zoom, drag, and hover highlighting.</p>
-    <div class="params">
-      <span>output?</span>
-    </div>
-  </div>
-
-  <div class="card">
-    <h4>generate_migration</h4>
-    <p>Generates a versioned delta migration SQL script by diffing <code>db-design.json</code> against the last snapshot. Each migration produces a paired <code>.sql</code> and <code>.json</code> file. Detects table/column/view adds, removes, and modifications, index and FK changes, and emits warnings for destructive operations.</p>
-    <div class="params">
-      <span>description</span> <span>provider?</span> <span>output?</span> <span>dryRun?</span>
-    </div>
-  </div>
-
-  <div class="card">
-    <h4>validate_config</h4>
-    <p>Validates the project's <code>persistence.project.json</code> against its JSON Schema (catching unknown or misspelled property names) and checks referenced templates. Also validates <code>db-design.json</code> if it exists. No database connection needed.</p>
-    <div class="params">No parameters</div>
-  </div>
-
-  <div class="card">
-    <h4>list_templates</h4>
-    <p>Lists available templates from the project configuration.</p>
-    <div class="params">No parameters</div>
-  </div>
-
-  <div class="card">
-    <h4>update</h4>
-    <p>Refreshes project files after upgrading pondhawk-mcp. Overwrites <code>AGENTS.md</code> with the latest agent instructions, <code>persistence.project.schema.json</code> and <code>db-design.schema.json</code> with the latest JSON Schemas, then normalizes <code>persistence.project.json</code> via a load/save round-trip to pick up new defaults. All existing configuration values are preserved.</p>
-    <div class="params">No parameters</div>
-  </div>
-
-</div>
-
-<!-- ───────────────────── Design-First Pipeline ───────────────────── -->
-<h2 id="design-first">Design-First Pipeline</h2>
+<!-- ───────────────────── Model ───────────────────── -->
+<h2 id="model">The Input Model</h2>
 <p>
-  In addition to the database-first workflow, pondhawk-mcp supports a
-  <strong>design-first</strong> pipeline where you author <code>db-design.json</code>
-  by hand to design a new database schema, then generate DDL SQL and ER diagrams.
+  <code>model.json</code> holds a tree of nodes. Every node has a <code>Name</code> and a
+  <code>Kind</code>, and may have <code>Children</code>. Everything else you write on a node
+  is metadata, and templates read it as an ordinary member — <code>"Type": "int"</code>
+  is reached as <code>{{ p.Type }}</code>, with no <code>Metadata.</code> prefix.
 </p>
-
-<h3>How It Works</h3>
-<ol class="steps">
-  <li>
-    <span class="step-number">1</span>
-    <div>
-      <strong>Design the schema</strong> — Write <code>db-design.json</code> with
-      <code>"Origin": "design"</code>. Define tables, columns, primary keys, foreign keys,
-      indexes, and enums. The <code>db-design.schema.json</code> file provides IDE
-      autocompletion.
-    </div>
-  </li>
-  <li>
-    <span class="step-number">2</span>
-    <div>
-      <strong>Generate DDL</strong> — Ask Claude to run <code>generate_ddl</code>
-      with your target provider (e.g. <code>postgresql</code>). This produces a SQL
-      file with CREATE TABLE, indexes, foreign keys, and enum types in the correct
-      dialect.
-    </div>
-  </li>
-  <li>
-    <span class="step-number">3</span>
-    <div>
-      <strong>Visualize</strong> — Ask Claude to run <code>generate_diagram</code> to
-      create an interactive HTML ER diagram. Open the file in any browser to review
-      your schema visually with pan, zoom, and drag support.
-    </div>
-  </li>
-</ol>
-
-<h3>The Origin Field</h3>
-<p>
-  The <code>Origin</code> field in <code>db-design.json</code> controls overwrite
-  protection:
-</p>
-<table>
-  <thead>
-    <tr><th>Value</th><th>Set By</th><th>Meaning</th></tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td><code>"introspected"</code></td><td><code>introspect_schema</code></td>
-      <td>File was generated from a live database. <code>introspect_schema</code> can freely overwrite it.</td>
-    </tr>
-    <tr>
-      <td><code>"design"</code></td><td>Hand-authored</td>
-      <td>File was written for design-first use. <code>introspect_schema</code> <strong>refuses to overwrite</strong> and returns an error.</td>
-    </tr>
-  </tbody>
-</table>
-<p>
-  To switch a design-first schema back to database-first, delete
-  <code>db-design.json</code> or change <code>Origin</code> to
-  <code>"introspected"</code>.
-</p>
-
-<h3>Design-First Schema Example</h3>
 <pre><code>{
-  "$schema": "db-design.schema.json",
-  "Origin": "design",
-  "Schemas": [
+  "$schema": "./model.schema.json",
+  "Name": "Catalog",
+  "Nodes": [
     {
-      "Name": "public",
-      "Tables": [
-        {
-          "Name": "Users",
-          "Note": "Application users",
-          "Columns": [
-            { "Name": "Id", "DataType": "int", "IsPrimaryKey": true, "IsIdentity": true },
-            { "Name": "Email", "DataType": "varchar(255)" },
-            { "Name": "Role", "DataType": "UserRole" }
-          ],
-          "PrimaryKey": { "Columns": ["Id"] },
-          "Indexes": [
-            { "Columns": ["Email"], "IsUnique": true }
-          ]
-        }
-      ],
-      "Views": [
-        {
-          "Name": "ActiveUsers",
-          "Note": "Users with verified emails",
-          "SelectSql": "SELECT Id, Email, Role FROM Users WHERE Email IS NOT NULL",
-          "Columns": [
-            { "Name": "Id", "DataType": "int" },
-            { "Name": "Email", "DataType": "varchar(255)" },
-            { "Name": "Role", "DataType": "UserRole" }
-          ]
-        }
-      ]
-    }
-  ],
-  "Enums": [
-    {
-      "Name": "UserRole",
-      "Values": [
-        { "Name": "Admin" },
-        { "Name": "Editor" },
-        { "Name": "Viewer" }
+      "Name": "Product",
+      "Kind": "Class",
+      "Children": [
+        { "Name": "Id",    "Kind": "Property", "Type": "int" },
+        { "Name": "Price", "Kind": "Property", "Type": "decimal", "IsNullable": false }
       ]
     }
   ]
 }</code></pre>
-
-<h3>DDL Dialect Support</h3>
-<p>The <code>generate_ddl</code> tool supports four SQL dialects with the correct syntax for each:</p>
+<p>
+  Nodes nest to any depth. Two levels suit a class with properties; three suit a resource
+  whose operations have parameters.
+</p>
 <table>
-  <thead>
-    <tr><th>Feature</th><th>SQL Server</th><th>PostgreSQL</th><th>MySQL</th><th>SQLite</th></tr>
-  </thead>
+  <thead><tr><th>Artifact</th><th>Level 1</th><th>Level 2</th><th>Level 3</th></tr></thead>
   <tbody>
-    <tr><td>Identifier quoting</td><td><code>[name]</code></td><td><code>"name"</code></td><td><code>`name`</code></td><td><code>"name"</code></td></tr>
-    <tr><td>Auto-increment</td><td><code>IDENTITY(1,1)</code></td><td><code>GENERATED ALWAYS AS IDENTITY</code></td><td><code>AUTO_INCREMENT</code></td><td><code>AUTOINCREMENT</code></td></tr>
-    <tr><td>Enum handling</td><td>CHECK constraint</td><td><code>CREATE TYPE AS ENUM</code></td><td>Inline <code>ENUM(...)</code></td><td>CHECK constraint</td></tr>
-    <tr><td>Boolean type</td><td><code>bit</code></td><td><code>boolean</code></td><td><code>tinyint(1)</code></td><td><code>INTEGER</code></td></tr>
-    <tr><td>View syntax</td><td><code>CREATE VIEW [s].[v] AS</code></td><td><code>CREATE VIEW "s"."v" AS</code></td><td><code>CREATE VIEW `s`.`v` AS</code></td><td><code>CREATE VIEW "v" AS</code></td></tr>
+    <tr><td>Entity</td><td>class</td><td>property</td><td>—</td></tr>
+    <tr><td>API client</td><td>resource</td><td>operation</td><td>parameter</td></tr>
+    <tr><td>gRPC service</td><td>service</td><td>rpc</td><td>message field</td></tr>
+    <tr><td>Command handlers</td><td>aggregate</td><td>command</td><td>field</td></tr>
   </tbody>
 </table>
-
-<h3>ER Diagram Features</h3>
-<p>The <code>generate_diagram</code> tool produces a self-contained HTML file with:</p>
-<ul>
-  <li><strong>Table boxes</strong> — column names, data types, and constraint icons (PK, FK, Unique, NOT NULL)</li>
-  <li><strong>FK relationship lines</strong> — SVG lines connecting foreign key columns to their referenced tables</li>
-  <li><strong>Enum boxes</strong> — distinct green-themed boxes listing enum values</li>
-  <li><strong>Interactivity</strong> — pan (drag background), zoom (scroll wheel), drag tables (drag header), hover highlight on FK lines</li>
-  <li><strong>FK-aware auto-layout</strong> — connected tables are placed adjacent to each other</li>
-</ul>
-
 <div class="tip">
-  Both <code>generate_ddl</code> and <code>generate_diagram</code> work with any
-  <code>db-design.json</code> — whether hand-authored or introspected from a database.
-  They also merge explicit <code>Relationships</code> from
-  <code>persistence.project.json</code> if the config file exists.
+  <strong>Kind is yours to choose.</strong> It names what a node is, and it selects the macro
+  that renders it. Nothing in the engine has a list of valid kinds.
 </div>
 
-<!-- ───────────────────── Migrations ───────────────────── -->
-<h2 id="migrations">Migrations</h2>
+<!-- ───────────────────── Templates ───────────────────── -->
+<h2 id="templates">Templates &amp; Dispatch</h2>
 <p>
-  The <code>generate_migration</code> tool produces versioned delta migration scripts
-  by comparing <code>db-design.json</code> against the last migration snapshot. This
-  works for both database-first and design-first workflows — edit
-  <code>db-design.json</code> (or re-introspect), then generate a migration to capture
-  the changes.
+  Templates are <a href="https://shopify.github.io/liquid/">Liquid</a>, rendered by Fluid.
+  Write one <code>Default&lt;Kind&gt;</code> macro per kind, and let
+  <code>{% dispatch %}</code> pick the right one:
 </p>
+<pre><code>{%- macro DefaultClass(c) %}
+public partial class {{ c.Name | pascal_case }}
+{%- endmacro %}
 
-<h3>How It Works</h3>
-<ol class="steps">
-  <li>
-    <span class="step-number">1</span>
-    <div>
-      <strong>Edit the schema</strong> — Modify <code>db-design.json</code> to reflect
-      the desired state (add tables, rename columns, change types, etc.).
-    </div>
-  </li>
-  <li>
-    <span class="step-number">2</span>
-    <div>
-      <strong>Generate the migration</strong> — Ask Claude to run
-      <code>generate_migration</code> with a description (e.g. "add orders table").
-      The tool diffs the current <code>db-design.json</code> against the last snapshot
-      and produces provider-specific SQL.
-    </div>
-  </li>
-  <li>
-    <span class="step-number">3</span>
-    <div>
-      <strong>Review and deploy</strong> — Two files are written: a <code>.sql</code>
-      migration script and a <code>.json</code> snapshot. Review the SQL, then deploy
-      it using your preferred migration runner (DbUp, Flyway, a custom CLI, etc.).
-    </div>
-  </li>
-</ol>
+{%- macro DefaultProperty(p) %}
+    public {{ p.Type | type_nullable: p.IsNullable }} {{ p.Name | pascal_case }} { get; set; }
+{%- endmacro %}
 
-<h3>Detected Changes</h3>
-<table>
-  <thead>
-    <tr><th>Change Type</th><th>SQL Generated</th></tr>
-  </thead>
-  <tbody>
-    <tr><td>Table added</td><td><code>CREATE TABLE</code></td></tr>
-    <tr><td>Table removed</td><td><code>DROP TABLE</code></td></tr>
-    <tr><td>Column added</td><td><code>ALTER TABLE ADD COLUMN</code></td></tr>
-    <tr><td>Column removed</td><td><code>ALTER TABLE DROP COLUMN</code></td></tr>
-    <tr><td>Column modified</td><td><code>ALTER TABLE ALTER COLUMN</code></td></tr>
-    <tr><td>Index added / removed / modified</td><td><code>CREATE INDEX</code> / <code>DROP INDEX</code></td></tr>
-    <tr><td>Foreign key added / removed / modified</td><td><code>ALTER TABLE ADD/DROP CONSTRAINT</code></td></tr>
-    <tr><td>Primary key modified</td><td><code>DROP PK</code> + <code>ADD PK</code></td></tr>
-    <tr><td>View added</td><td><code>CREATE VIEW</code></td></tr>
-    <tr><td>View removed</td><td><code>DROP VIEW</code></td></tr>
-    <tr><td>View modified</td><td><code>DROP VIEW</code> + <code>CREATE VIEW</code></td></tr>
-  </tbody>
-</table>
-
-<h3>Warnings</h3>
-<p>The tool emits warnings for potentially dangerous operations:</p>
-<ul>
-  <li><strong>Destructive</strong> — Table or column removed (potential data loss)</li>
-  <li><strong>PossibleRename</strong> — Column removed + similar column added in same table (may be a rename, not drop/add)</li>
-  <li><strong>DataLoss</strong> — Column type narrowed (e.g. <code>varchar(255)</code> to <code>varchar(50)</code>)</li>
-  <li><strong>NoChanges</strong> — Baseline and desired are identical; no migration needed</li>
-</ul>
-
-<h3>Migration Directory Structure</h3>
-<pre><code>migrations/
-  V001__initial_schema.sql        &lt;- full CREATE for bootstrap
-  V001__initial_schema.json       &lt;- snapshot of db-design.json at V001
-  V002__add_orders_table.sql      &lt;- delta ALTER statements
-  V002__add_orders_table.json     &lt;- snapshot at V002
-  V003__add_billing_columns.sql   &lt;- delta ALTER statements
-  V003__add_billing_columns.json  &lt;- snapshot at V003</code></pre>
-
-<h3>Statement Ordering</h3>
-<p>
-  Drops are emitted first (FKs, indexes, columns, PKs, tables), then creates
-  (tables, columns, modified columns, indexes, FKs), and finally view changes
-  (drop, create, modify). Views are processed after all table changes since
-  views may reference tables. This ensures referential integrity during
-  migration execution.
-</p>
-
-<div class="tip">
-  Use the <code>dryRun</code> parameter to preview the diff and generated SQL without
-  writing any files. This is useful for reviewing changes before committing them.
-</div>
-
-<!-- ───────────────────── Configuration Reference ───────────────────── -->
-<h2 id="configuration">Configuration Reference</h2>
-<p>
-  The <code>persistence.project.json</code> file is the single source of truth for
-  your project. It includes a <code>$schema</code> reference to
-  <code>persistence.project.schema.json</code>, which provides IDE autocompletion
-  and ensures that misspelled or unknown property names are caught immediately by
-  <code>validate_config</code>. It contains the following top-level sections:
-</p>
-
-<table>
-  <thead>
-    <tr><th>Section</th><th>Required</th><th>Purpose</th></tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td><code>ProjectName</code></td><td>No</td>
-      <td>Project name used in output file names and diagram title bar.</td>
-    </tr>
-    <tr>
-      <td><code>Description</code></td><td>No</td>
-      <td>Optional project description shown in DDL header and diagram title bar.</td>
-    </tr>
-    <tr>
-      <td><code>Connection</code></td><td>Yes</td>
-      <td>Database connection with a <code>Provider</code> and <code>ConnectionString</code>.</td>
-    </tr>
-    <tr>
-      <td><code>OutputDir</code></td><td>Yes</td>
-      <td>Directory where generated files are written (e.g. <code>"src/Data"</code>).</td>
-    </tr>
-    <tr>
-      <td><code>Templates</code></td><td>Yes</td>
-      <td>Named template definitions with <code>Path</code>, <code>OutputPattern</code>, <code>Scope</code> (<code>PerModel</code> | <code>SingleFile</code>), <code>Mode</code> (<code>Always</code> | <code>SkipExisting</code>), and optional <code>AppliesTo</code> (<code>Tables</code> | <code>Views</code> | <code>All</code>).</td>
-    </tr>
-    <tr>
-      <td><code>Defaults</code></td><td>No</td>
-      <td>Default values for <code>Namespace</code>, <code>ContextName</code>, <code>Schema</code>, <code>IncludeViews</code>, <code>Include</code>, and <code>Exclude</code>.</td>
-    </tr>
-    <tr>
-      <td><code>DataTypes</code></td><td>No</td>
-      <td>Custom reusable type definitions (<code>ClrType</code>, optional <code>MaxLength</code> and <code>DefaultValue</code>).</td>
-    </tr>
-    <tr>
-      <td><code>TypeMappings</code></td><td>No</td>
-      <td>Maps database column types to CLR types or named <code>DataTypes</code>. Uses family-based inference: types like <code>decimal(42,2)</code> resolve via the base type <code>decimal</code> when no exact match exists.</td>
-    </tr>
-    <tr>
-      <td><code>Relationships</code></td><td>No</td>
-      <td>Explicit foreign-key relationships that supplement introspected FKs. Merged at generation time (not written to <code>db-design.json</code>).</td>
-    </tr>
-    <tr>
-      <td><code>Overrides</code></td><td>No</td>
-      <td>Per-class and per-property customizations: variant selection, <code>DataType</code> assignment, and <code>Ignore</code> flags.</td>
-    </tr>
-    <tr>
-      <td><code>Logging</code></td><td>No</td>
-      <td>Optional file-based logging (<code>Enabled</code>, <code>LogPath</code>, <code>Level</code>, <code>RollingInterval</code>, <code>RetainedFileCountLimit</code>).</td>
-    </tr>
-  </tbody>
-</table>
-
-<!-- ───────────────────── Environment Variables ───────────────────── -->
-<h2 id="env">Environment Variables</h2>
-<p>
-  Database credentials should be kept out of version control. The
-  <code>.env</code> file, located beside <code>persistence.project.json</code>,
-  stores connection strings as simple <code>KEY=VALUE</code> pairs:
-</p>
-<pre><code># Database connection string — keep this file out of version control
-DB_CONNECTION=Server=localhost;Database=MyDatabase;Trusted_Connection=true;</code></pre>
-<p>
-  Reference variables in connection strings using <code>${VAR_NAME}</code> syntax:
-</p>
-<pre><code>"Connection": {
-  "Provider": "sqlserver",
-  "ConnectionString": "${DB_CONNECTION}"
+{% dispatch item %}
+{
+{%- for p in item.Children %}
+{% dispatch p %}
+{%- endfor %}
 }</code></pre>
 <p>
-  System environment variables take precedence over values defined in
-  <code>.env</code>. If a referenced variable is missing from both sources,
-  the tool reports an error.
+  This is the consistency guarantee: every node of a kind goes through one macro, so changing
+  that macro changes every artifact at once.
+</p>
+
+<h3>Variants</h3>
+<p>
+  When one node needs to render differently, define a <code>&lt;Variant&gt;&lt;Kind&gt;</code>
+  macro and point an override at it. Dispatch falls back to <code>Default&lt;Kind&gt;</code>
+  when the variant macro is missing, so an override naming a macro you have not written yet
+  degrades rather than breaking.
+</p>
+<pre><code>{%- macro CurrencyProperty(p) %}
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal {{ p.Name | pascal_case }} { get; set; }
+{%- endmacro %}</code></pre>
+
+<h3>Template context</h3>
+<table>
+  <thead><tr><th>Variable</th><th>Contents</th></tr></thead>
+  <tbody>
+    <tr><td><code>item</code></td><td>The current node (<code>PerItem</code> scope)</td></tr>
+    <tr><td><code>items</code></td><td>All matching nodes (<code>Single</code> scope)</td></tr>
+    <tr><td><code>model</code></td><td>The model root — <code>{{ model.Name }}</code> plus root metadata</td></tr>
+    <tr><td><code>values</code></td><td>The <code>Values</code> section of the config</td></tr>
+    <tr><td><code>config</code></td><td>The project configuration</td></tr>
+    <tr><td><code>parameters</code></td><td>Key-values passed to the <code>generate</code> call</td></tr>
+  </tbody>
+</table>
+
+<h3>Custom filters</h3>
+<table>
+  <thead><tr><th>Filter</th><th>Example</th><th>Output</th></tr></thead>
+  <tbody>
+    <tr><td><code>pascal_case</code></td><td><code>"order_item"</code></td><td><code>OrderItem</code></td></tr>
+    <tr><td><code>camel_case</code></td><td><code>"OrderItem"</code></td><td><code>orderItem</code></td></tr>
+    <tr><td><code>snake_case</code></td><td><code>"OrderItem"</code></td><td><code>order_item</code></td></tr>
+    <tr><td><code>pluralize</code></td><td><code>"Category"</code></td><td><code>Categories</code></td></tr>
+    <tr><td><code>singularize</code></td><td><code>"Categories"</code></td><td><code>Category</code></td></tr>
+    <tr><td><code>type_nullable</code></td><td><code>"int" | type_nullable: true</code></td><td><code>int?</code></td></tr>
+  </tbody>
+</table>
+<p>Liquid's built-in filters are all available as well.</p>
+
+<!-- ───────────────────── Overrides ───────────────────── -->
+<h2 id="overrides">Overrides</h2>
+<p>
+  Overrides address nodes by path and change how they render for one artifact — selecting a
+  variant macro, merging extra metadata, or dropping the node entirely.
+</p>
+<pre><code>"Overrides": [
+  { "Path": "Product/Price", "Artifact": "entity", "Variant": "Currency" },
+  { "Path": "*/CreatedAt",   "Artifact": "entity", "Ignore": true },
+  { "Path": "Order/**",      "Artifact": "dto",    "Metadata": { "Access": "internal" } }
+]</code></pre>
+<table>
+  <thead><tr><th>Field</th><th>Meaning</th></tr></thead>
+  <tbody>
+    <tr><td><code>Path</code></td><td>Slash-delimited node path. <code>*</code> matches one node, <code>**</code> matches any depth.</td></tr>
+    <tr><td><code>Artifact</code></td><td>Template key. Required with <code>Variant</code>; omit to apply to every template.</td></tr>
+    <tr><td><code>Variant</code></td><td>Macro variant to render matched nodes with.</td></tr>
+    <tr><td><code>Ignore</code></td><td>Drops matched nodes from that artifact.</td></tr>
+    <tr><td><code>Metadata</code></td><td>Merged onto matched nodes, overwriting what the model declared.</td></tr>
+  </tbody>
+</table>
+<div class="tip">
+  When several overrides match one node, the one with the <strong>most literal path
+  segments</strong> wins. Ties go to whichever is listed later — so state the broad rule
+  first and narrow it afterwards.
+</div>
+
+<!-- ───────────────────── Tools ───────────────────── -->
+<h2 id="tools">Available Tools</h2>
+<div class="card-grid">
+  <div class="card">
+    <h4>init</h4>
+    <p>Scaffolds a new project: config, starter model, example templates, JSON schemas, AGENTS.md and .env. Refuses to overwrite an existing config.</p>
+    <p class="params"><span>projectName</span><span>outputDir</span><span>namespace</span></p>
+  </div>
+  <div class="card">
+    <h4>generate</h4>
+    <p>Renders every configured template against <code>model.json</code> and writes the files. Reports what was created, overwritten and skipped.</p>
+    <p class="params"><span>templates</span><span>items</span><span>parameters</span></p>
+  </div>
+  <div class="card">
+    <h4>validate_config</h4>
+    <p>Checks the config, templates and model without generating anything. Reports errors and warnings.</p>
+    <p class="params">no parameters</p>
+  </div>
+  <div class="card">
+    <h4>list_templates</h4>
+    <p>Lists the configured templates with their scope, mode, output pattern and AppliesTo.</p>
+    <p class="params">no parameters</p>
+  </div>
+  <div class="card">
+    <h4>update</h4>
+    <p>Refreshes AGENTS.md and the JSON schemas after upgrading pondhawk, and normalises the config.</p>
+    <p class="params">no parameters</p>
+  </div>
+</div>
+
+<!-- ───────────────────── Configuration ───────────────────── -->
+<h2 id="configuration">Configuration Reference</h2>
+<pre><code>{
+  "$schema": "./pondhawk.project.schema.json",
+  "OutputDir": "src/Generated",
+  "Templates": {
+    "entity": {
+      "Path": "templates/entity.generated.liquid",
+      "OutputPattern": "{{ item.Name | pascal_case }}.generated.cs",
+      "Scope": "PerItem",
+      "Mode": "Always",
+      "AppliesTo": "Class"
+    },
+    "entity-stub": {
+      "Path": "templates/entity.stub.liquid",
+      "OutputPattern": "{{ item.Name | pascal_case }}.cs",
+      "Scope": "PerItem",
+      "Mode": "SkipExisting",
+      "AppliesTo": "Class"
+    }
+  },
+  "Values": { "Namespace": "MyApp.Data" },
+  "Overrides": [],
+  "Logging": { "Enabled": false }
+}</code></pre>
+<table>
+  <thead><tr><th>Field</th><th>Meaning</th></tr></thead>
+  <tbody>
+    <tr><td><code>OutputDir</code></td><td>Root directory for generated files, relative to the project.</td></tr>
+    <tr><td><code>Templates</code></td><td>Templates to render, keyed by artifact name. The key is what overrides target.</td></tr>
+    <tr><td><code>Scope</code></td><td><code>PerItem</code> renders one file per matching node; <code>Single</code> renders one file for all.</td></tr>
+    <tr><td><code>Mode</code></td><td><code>Always</code> overwrites every run; <code>SkipExisting</code> writes once and then leaves it alone.</td></tr>
+    <tr><td><code>AppliesTo</code></td><td>Restricts a template to top-level nodes of one Kind. Omit or use <code>All</code> for every node.</td></tr>
+    <tr><td><code>Values</code></td><td>Anything templates need, read as <code>{{ values.X }}</code>.</td></tr>
+    <tr><td><code>Logging</code></td><td>Off by default. Enable to write a rolling log under <code>.pondhawk/logs</code>.</td></tr>
+  </tbody>
+</table>
+
+<h3>The two-file pattern</h3>
+<p>
+  Pair an <code>Always</code> template with a <code>SkipExisting</code> one to keep generated
+  code and hand-written code apart. The generated file is overwritten freely; the stub is
+  created once and is then yours. In C# these are <code>partial class</code> halves; other
+  languages have their own equivalents.
+</p>
+
+<!-- ───────────────────── Env ───────────────────── -->
+<h2 id="env">Environment Variables</h2>
+<p>
+  String entries under <code>Values</code> support <code>${VAR}</code> substitution, resolved
+  from a <code>.env</code> file in the project directory or from the process environment. Use
+  it for anything a template needs but that should not be committed.
+</p>
+<pre><code># .env — keep this out of version control
+BUILD_STAMP=2026.08.29
+LICENCE_KEY=xxxxxxxx</code></pre>
+<pre><code>"Values": {
+  "Stamp": "${BUILD_STAMP}"
+}</code></pre>
+<p>
+  <code>validate_config</code> warns about <code>${VAR}</code> references that resolve to
+  nothing, rather than silently generating files with an empty value in them.
 </p>
 
 <!-- ───────────────────── Tips ───────────────────── -->
 <h2 id="tips">Tips</h2>
-<ul>
-  <li>
-    <strong>Validate after every edit</strong> — Always ask Claude to run
-    <code>validate_config</code> after modifying <code>persistence.project.json</code>.
-    It validates against the JSON Schema first (catching unknown or misspelled field
-    names), then checks template files and semantic rules before you generate.
-  </li>
-  <li>
-    <strong>Use overrides instead of editing templates</strong> — For per-table or
-    per-column tweaks (renaming types, ignoring columns, selecting variants) use the
-    <code>Overrides</code> section rather than forking a template.
-  </li>
-  <li>
-    <strong>Start with <code>SkipExisting</code> stubs</strong> — Create a second
-    template with <code>"Mode": "SkipExisting"</code> for hand-edited partial classes.
-    These files are generated once and never overwritten.
-  </li>
-  <li>
-    <strong>Separate table and view templates</strong> — Use
-    <code>"AppliesTo": "Tables"</code> or <code>"AppliesTo": "Views"</code> on
-    template entries so entity templates only run for tables and view templates
-    only run for views, avoiding empty output files.
-  </li>
-  <li>
-    <strong>Empty output is skipped</strong> — If a template renders to
-    whitespace-only output (e.g. because of a guard condition), no file is
-    written to disk and the file is reported as skipped.
-  </li>
-  <li>
-    <strong>Filter large schemas</strong> — Use <code>Include</code> /
-    <code>Exclude</code> patterns in Defaults or pass <code>models</code> directly to
-    <code>generate</code> to limit output to the tables you care about.
-  </li>
-  <li>
-    <strong>Review before committing</strong> — After generating, ask Claude to review
-    the output files for correctness before committing them to source control.
-  </li>
-  <li>
-    <strong>Regenerate freely</strong> — Templates with <code>"Mode": "Always"</code>
-    are designed to be overwritten. Keep manual changes in separate stub files.
-  </li>
-  <li>
-    <strong>Check <code>AGENTS.md</code></strong> — The generated
-    <code>AGENTS.md</code> file contains detailed instructions that Claude reads
-    automatically. It covers the full template syntax, custom filters, macro/variant
-    system, and override rules.
-  </li>
-  <li>
-    <strong>Run <code>update</code> after upgrading</strong> — When you install a
-    newer version of pondhawk-mcp, ask Claude to run <code>update</code> on each
-    existing project. This overwrites <code>AGENTS.md</code> and
-    JSON Schema files with the latest versions and
-    normalizes your config file, all without losing any existing settings.
-  </li>
-  <li>
-    <strong>Always set <code>Origin</code> in design-first schemas</strong> — When
-    hand-authoring <code>db-design.json</code>, set <code>"Origin": "design"</code>
-    to prevent <code>introspect_schema</code> from accidentally overwriting your work.
-  </li>
-  <li>
-    <strong>Visualize before deploying</strong> — Run <code>generate_diagram</code>
-    to review your schema visually before generating DDL. It's easier to spot
-    missing relationships or naming issues in a diagram than in raw JSON.
-  </li>
-  <li>
-    <strong>Generate DDL for multiple dialects</strong> — You can run
-    <code>generate_ddl</code> multiple times with different providers to produce
-    SQL for each target database. Each run writes to a separate file
-    (e.g. <code>db-design.postgresql.sql</code>, <code>db-design.sqlite.sql</code>).
-  </li>
-  <li>
-    <strong>Use dry-run for migrations</strong> — Run <code>generate_migration</code>
-    with <code>dryRun: true</code> to preview the diff and SQL without writing files.
-    Review the changes before committing a migration.
-  </li>
-  <li>
-    <strong>Version migrations sequentially</strong> — Migration files are
-    auto-versioned (<code>V001</code>, <code>V002</code>, ...). Each
-    <code>.json</code> snapshot serves as the baseline for the next migration, so
-    keep the full history in version control.
-  </li>
-</ul>
+<div class="tip">
+  <strong>Read a generated file before declaring success.</strong> A template that renders
+  empty is skipped silently, and an unknown metadata key renders as nothing rather than
+  failing. Both look like success in the tool output.
+</div>
+<div class="tip">
+  <strong>Run <code>validate_config</code> after editing the model.</strong> It catches the
+  two mistakes that otherwise produce no files and no error: an override whose path matches
+  no node, and a template whose <code>AppliesTo</code> matches no Kind in the model.
+</div>
+<div class="tip">
+  <strong>Commit templates and the model.</strong> They are project assets, like source. The
+  generated output can be committed or regenerated, whichever suits your build.
+</div>
+<div class="tip">
+  <strong>Let the agent maintain the templates.</strong> They are the highest-leverage part of
+  the project — one macro decides how every artifact of a kind looks.
+</div>
 
-<hr style="margin-top: 3rem; border: none; border-top: 1px solid var(--color-border);">
-<p style="font-size: .85rem; color: var(--color-muted); margin-top: 1rem;">
-  pondhawk-generation-mcp — Generated documentation.
-  For the complete template and configuration reference, see the <code>AGENTS.md</code> file
-  created by the <code>init</code> tool.
+<p style="margin-top:3rem;color:var(--color-muted);font-size:.9rem;">
+  pondhawk-generation is licensed under the GNU General Public License v3.0. Code generated
+  from your own templates and models is yours, and is not covered by that licence.
 </p>
 
 </div>

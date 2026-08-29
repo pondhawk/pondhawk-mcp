@@ -9,13 +9,13 @@ namespace Pondhawk.Generation.Mcp.Tools;
 [McpServerToolType]
 public sealed class ValidateConfigTool
 {
-    [McpServerTool(Name = "validate_config"), Description("Validates the project's persistence.project.json and its referenced templates without connecting to any database. See AGENTS.md for detailed usage instructions.")]
+    [McpServerTool(Name = "validate_config"), Description("Validates pondhawk.project.json, the templates it references, and model.json. Reports errors and warnings without generating anything. See AGENTS.md for detailed usage instructions.")]
     public static string Execute(ServerContext ctx)
     {
         var (logger, sw) = ctx.StartToolCall("validate_config");
 
         if (!File.Exists(ctx.ConfigPath))
-            return JsonSerializer.Serialize(new { Valid = false, Errors = new[] { "persistence.project.json not found." }, Warnings = Array.Empty<string>() });
+            return JsonSerializer.Serialize(new { Valid = false, Errors = new[] { "pondhawk.project.json not found. Run init to scaffold a project." }, Warnings = Array.Empty<string>() });
 
         var rawJson = File.ReadAllText(ctx.ConfigPath);
         var config = ctx.EnsureConfig();

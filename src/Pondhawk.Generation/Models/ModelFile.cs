@@ -6,8 +6,8 @@ namespace Pondhawk.Generation.Models;
 
 /// <summary>
 /// The input model — a hand- or agent-authored JSON document describing the things to
-/// generate. Replaces the introspected db-design.json: pondhawk no longer reads databases,
-/// so an agent pairing this server with a schema-aware one writes the model here.
+/// generate. pondhawk reads no data sources of its own: an agent deriving a model from
+/// somewhere else (a database, an OpenAPI document) writes the result here.
 /// </summary>
 public sealed class ModelFile
 {
