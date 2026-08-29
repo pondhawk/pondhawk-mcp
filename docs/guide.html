@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>pondhawk-persistence-mcp — User Guide</title>
+<title>pondhawk-generation-mcp — User Guide</title>
 <style>
   :root {
     --color-bg: #fdfdfd;
@@ -104,12 +104,12 @@
 <body>
 <div class="container">
 
-<h1>pondhawk-persistence-mcp<small>Database introspection, code generation, design-first DDL &amp; migrations via MCP</small></h1>
+<h1>pondhawk-generation-mcp<small>Database introspection, code generation, design-first DDL &amp; migrations via MCP</small></h1>
 
 <nav>
   <ul>
     <li><a href="#what-is-mcp">What is MCP?</a></li>
-    <li><a href="#what-is-pondhawk">What is pondhawk-persistence-mcp?</a></li>
+    <li><a href="#what-is-pondhawk">What is pondhawk-generation-mcp?</a></li>
     <li><a href="#installation">Installation</a></li>
     <li><a href="#registering">Registering in Claude Code</a></li>
     <li><a href="#getting-started">Getting Started</a></li>
@@ -139,9 +139,9 @@
 </p>
 
 <!-- ───────────────────── What is pondhawk? ───────────────────── -->
-<h2 id="what-is-pondhawk">What is pondhawk-persistence-mcp?</h2>
+<h2 id="what-is-pondhawk">What is pondhawk-generation-mcp?</h2>
 <p>
-  <strong>pondhawk-persistence-mcp</strong> is an MCP server that gives Claude the
+  <strong>pondhawk-generation-mcp</strong> is an MCP server that gives Claude the
   ability to introspect relational database schemas, generate code using
   <a href="https://shopify.github.io/liquid/">Liquid</a> templates, produce
   dialect-specific DDL SQL, generate versioned delta migration scripts, and create
@@ -184,7 +184,7 @@
 
 <h3>Option A — CLI</h3>
 <p>Run the following command in your terminal:</p>
-<pre><code>claude mcp add pondhawk pondhawk-persistence-mcp -- --project C:/projects/my-app</code></pre>
+<pre><code>claude mcp add pondhawk pondhawk-generation-mcp -- --project C:/projects/my-app</code></pre>
 <p>
   Replace <code>C:/projects/my-app</code> with the path to the directory that
   contains (or will contain) your <code>persistence.project.json</code>.
@@ -198,7 +198,7 @@
 <pre><code>{
   "mcpServers": {
     "pondhawk": {
-      "command": "pondhawk-persistence-mcp",
+      "command": "pondhawk-generation-mcp",
       "args": ["--project", "C:/projects/my-app"]
     }
   }
@@ -745,7 +745,7 @@ DB_CONNECTION=Server=localhost;Database=MyDatabase;Trusted_Connection=true;</cod
 
 <hr style="margin-top: 3rem; border: none; border-top: 1px solid var(--color-border);">
 <p style="font-size: .85rem; color: var(--color-muted); margin-top: 1rem;">
-  pondhawk-persistence-mcp — Generated documentation.
+  pondhawk-generation-mcp — Generated documentation.
   For the complete template and configuration reference, see the <code>AGENTS.md</code> file
   created by the <code>init</code> tool.
 </p>

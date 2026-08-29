@@ -17,6 +17,6 @@ This runs Clean → Restore → Build → Test → Publish (self-contained singl
 Always run tests using `dotnet run` (not `dotnet test`) because xunit v3 projects are self-hosted executables and the VSTest testhost has a version mismatch:
 
 ```bash
-dotnet run --project tests/Pondhawk.Persistence.Core.Tests --configuration Release
-dotnet run --project tests/Pondhawk.Persistence.Mcp.Tests --configuration Release
+dotnet run --project tests/Pondhawk.Generation.Tests --configuration Release
+dotnet run --project tests/Pondhawk.Generation.Mcp.Tests --configuration Release
 ```

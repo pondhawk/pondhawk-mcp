@@ -15,7 +15,7 @@ public sealed class PublishTask : FrostingTask<BuildContext>
     {
         foreach (var rid in Rids)
         {
-            context.DotNetPublish("src/Pondhawk.Persistence.Mcp", new DotNetPublishSettings
+            context.DotNetPublish("src/Pondhawk.Generation.Mcp", new DotNetPublishSettings
             {
                 Configuration = context.Configuration,
                 Runtime = rid,

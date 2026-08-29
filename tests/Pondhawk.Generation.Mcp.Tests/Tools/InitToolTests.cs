@@ -1,0 +1,152 @@
+using System.Text.Json;
+using Pondhawk.Generation.Configuration;
+using Pondhawk.Generation.Models;
+using Pondhawk.Generation.Rendering;
+using Pondhawk.Generation.Mcp;
+using Pondhawk.Generation.Mcp.Tools;
+using Shouldly;
+
+namespace Pondhawk.Generation.Mcp.Tests.Tools;
+
+public class InitToolTests : IDisposable
+{
+    private readonly string _tempDir;
+
+    public InitToolTests()
+    {
+        _tempDir = Path.Combine(Path.GetTempPath(), $"pondhawk_init_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(_tempDir);
+    }
+
+    public void Dispose()
+    {
+        if (Directory.Exists(_tempDir))
+            Directory.Delete(_tempDir, true);
+    }
+
+    private string Path_(params string[] parts)
+        => System.IO.Path.Combine([_tempDir, .. parts]);
+
+    [Fact]
+    public void Init_CreatesAllExpectedFiles()
+    {
+        var result = InitTool.Execute(new ServerContext(_tempDir));
+        var json = JsonDocument.Parse(result);
+
+        json.RootElement.GetProperty("FilesCreated").GetArrayLength().ShouldBe(8);
+        File.Exists(Path_("pondhawk.project.json")).ShouldBeTrue();
+        File.Exists(Path_("pondhawk.project.schema.json")).ShouldBeTrue();
+        File.Exists(Path_("model.json")).ShouldBeTrue();
+        File.Exists(Path_("model.schema.json")).ShouldBeTrue();
+        File.Exists(Path_("AGENTS.md")).ShouldBeTrue();
+        File.Exists(Path_(".env")).ShouldBeTrue();
+        File.Exists(Path_("templates", "entity.generated.liquid")).ShouldBeTrue();
+        File.Exists(Path_("templates", "entity.stub.liquid")).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Init_ThrowsError_WhenConfigExists()
+    {
+        File.WriteAllText(Path_("pondhawk.project.json"), "{}");
+
+        Should.Throw<InvalidOperationException>(() => InitTool.Execute(new ServerContext(_tempDir)))
+            .Message.ShouldContain("already exists");
+    }
+
+    [Fact]
+    public void Init_AppliesProjectNameParameter()
+    {
+        InitTool.Execute(new ServerContext(_tempDir), projectName: "Catalog");
+
+        ProjectConfigurationLoader.Load(Path_("pondhawk.project.json")).ProjectName.ShouldBe("Catalog");
+        ModelFileLoader.Load(Path_("model.json")).Name.ShouldBe("Catalog");
+    }
+
+    [Fact]
+    public void Init_AppliesNamespaceParameter()
+    {
+        InitTool.Execute(new ServerContext(_tempDir), @namespace: "Acme.Data");
+
+        ProjectConfigurationLoader.Load(Path_("pondhawk.project.json")).Values["Namespace"].ShouldBe("Acme.Data");
+    }
+
+    [Fact]
+    public void Init_AppliesOutputDirParameter()
+    {
+        InitTool.Execute(new ServerContext(_tempDir), outputDir: "gen");
+
+        ProjectConfigurationLoader.Load(Path_("pondhawk.project.json")).OutputDir.ShouldBe("gen");
+    }
+
+    [Fact]
+    public void Init_GeneratedTemplatesAreValidLiquid()
+    {
+        InitTool.Execute(new ServerContext(_tempDir));
+        var engine = new TemplateEngine();
+
+        foreach (var name in new[] { "entity.generated.liquid", "entity.stub.liquid" })
+        {
+            var source = File.ReadAllText(Path_("templates", name));
+            engine.TryParse(source, out _, out var error).ShouldBeTrue($"{name}: {error}");
+        }
+    }
+
+    [Fact]
+    public void Init_ScaffoldedProjectValidatesCleanly()
+    {
+        // The scaffold is the first thing anyone runs, so it must not emit its own warnings.
+        var ctx = new ServerContext(_tempDir);
+        InitTool.Execute(ctx);
+
+        var rawJson = File.ReadAllText(Path_("pondhawk.project.json"));
+        var config = ProjectConfigurationLoader.Deserialize(rawJson);
+        var result = ConfigurationValidator.Validate(rawJson, config, _tempDir);
+
+        result.Errors.ShouldBeEmpty();
+        result.Warnings.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Init_ScaffoldedProjectGenerates()
+    {
+        var ctx = new ServerContext(_tempDir);
+        InitTool.Execute(ctx);
+
+        GenerateTool.Execute(ctx);
+
+        var generated = Path_("src", "Generated", "Product.generated.cs");
+        File.Exists(generated).ShouldBeTrue();
+
+        var content = File.ReadAllText(generated);
+        content.ShouldContain("public partial class Product");
+        content.ShouldContain("public int Id { get; set; }");
+        content.ShouldContain("public decimal Price { get; set; }");
+    }
+
+    [Fact]
+    public void Init_StarterModelMatchesItsSchema()
+    {
+        InitTool.Execute(new ServerContext(_tempDir));
+
+        ModelFileSchema.Validate(File.ReadAllText(Path_("model.json"))).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Init_ConfigIncludesLoggingSectionDisabled()
+    {
+        InitTool.Execute(new ServerContext(_tempDir));
+
+        var config = File.ReadAllText(Path_("pondhawk.project.json"));
+        config.ShouldContain("Logging");
+        config.ShouldContain("\"Enabled\": false");
+    }
+
+    [Fact]
+    public void Init_DoesNotOverwriteAnExistingModel()
+    {
+        File.WriteAllText(Path_("model.json"), """{ "Name": "Mine", "Nodes": [] }""");
+        InitTool.Execute(new ServerContext(_tempDir));
+
+        ModelFileLoader.Load(Path_("model.json")).Name.ShouldBe("Mine");
+    }
+}

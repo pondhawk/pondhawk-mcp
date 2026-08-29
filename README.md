@@ -32,7 +32,7 @@ Add pondhawk-mcp to your AI tool's MCP configuration:
 {
   "mcpServers": {
     "pondhawk": {
-      "command": "pondhawk-persistence-mcp",
+      "command": "pondhawk-generation-mcp",
       "args": ["--project", "/path/to/your/project"]
     }
   }
@@ -260,8 +260,8 @@ dotnet run --project build -- --target=Publish
 Tests use xUnit v3 self-hosted executables. Always run with `dotnet run`:
 
 ```bash
-dotnet run --project tests/Pondhawk.Persistence.Core.Tests --configuration Release
-dotnet run --project tests/Pondhawk.Persistence.Mcp.Tests --configuration Release
+dotnet run --project tests/Pondhawk.Generation.Tests --configuration Release
+dotnet run --project tests/Pondhawk.Generation.Mcp.Tests --configuration Release
 ```
 
 All tests run without external database servers — SQLite in-memory databases are used for introspection and pipeline tests.
@@ -272,10 +272,10 @@ The `Publish` target produces self-contained single-file executables (no .NET ru
 
 | Platform | Binary |
 |----------|--------|
-| Windows x64 | `publish/win-x64/pondhawk-persistence-mcp.exe` |
-| macOS ARM64 | `publish/osx-arm64/pondhawk-persistence-mcp` |
-| Linux x64 | `publish/linux-x64/pondhawk-persistence-mcp` |
-| Linux ARM64 | `publish/linux-arm64/pondhawk-persistence-mcp` |
+| Windows x64 | `publish/win-x64/pondhawk-generation-mcp.exe` |
+| macOS ARM64 | `publish/osx-arm64/pondhawk-generation-mcp` |
+| Linux x64 | `publish/linux-x64/pondhawk-generation-mcp` |
+| Linux ARM64 | `publish/linux-arm64/pondhawk-generation-mcp` |
 
 ## Architecture
 
@@ -311,8 +311,8 @@ The `Publish` target produces self-contained single-file executables (no .NET ru
 
 The solution is split into two projects:
 
-- **Pondhawk.Persistence.Core** — Class library with all core functionality (schema introspection, template rendering, DDL generation, migration generation, diagram generation, caching, logging)
-- **Pondhawk.Persistence.Mcp** — Thin MCP server layer that wraps core library methods as MCP tools
+- **Pondhawk.Generation** — Class library with all core functionality (schema introspection, template rendering, DDL generation, migration generation, diagram generation, caching, logging)
+- **Pondhawk.Generation.Mcp** — Thin MCP server layer that wraps core library methods as MCP tools
 
 This separation allows the core library to be reused by other modalities (e.g., a CLI tool) without depending on MCP.
 

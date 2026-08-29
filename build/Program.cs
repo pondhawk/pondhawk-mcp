@@ -12,7 +12,7 @@ public class BuildContext : FrostingContext
 
     public BuildContext(ICakeContext context) : base(context)
     {
-        SolutionPath = context.Arguments.GetArgument("solution") ?? "pondhawk-mcp.slnx";
+        SolutionPath = context.Arguments.GetArgument("solution") ?? "pondhawk-generation.slnx";
         Configuration = context.Arguments.GetArgument("configuration") ?? "Release";
     }
 }

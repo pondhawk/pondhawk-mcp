@@ -78,7 +78,7 @@ All NuGet packages must use the latest stable (non-preview) release as of Februa
 | MySqlConnector (latest stable)            | MySQL (5.7+), MariaDB (10.2+), AWS Aurora MySQL, Azure Database for MySQL |
 | Microsoft.Data.Sqlite (latest stable)     | SQLite 3                                                               |
 
-All four providers are bundled as dependencies of `Pondhawk.Persistence.Core`.
+All four providers are bundled as dependencies of `Pondhawk.Generation`.
 
 **DDL generation uses FluentMigrator v8.0.1** (`FluentMigrator.Runner.SqlServer`, `.Postgres`, `.MySql`, `.SQLite`) as a dialect-aware SQL formatting engine. The generators are used standalone (no DI, no database connection) to produce correctly-quoted, dialect-specific DDL from in-memory expression objects. The HTML ER diagram generator is implemented with no external libraries beyond the existing stack. The `db-design.json` format is extended with optional fields (enums, notes, OnUpdate) to support design-first authoring — see section 16.2 for details.
 
@@ -119,9 +119,9 @@ All four providers are bundled as dependencies of `Pondhawk.Persistence.Core`.
 The solution is split into two projects to separate core functionality from the MCP transport layer. This allows the core library to be reused by other modalities (e.g., a CLI tool) without depending on MCP.
 
 ```
-pondhawk-mcp.slnx
+pondhawk-generation.slnx
 ├── src/
-│   ├── Pondhawk.Persistence.Core/            ← class library (.NET 10)
+│   ├── Pondhawk.Generation/            ← class library (.NET 10)
 │   │   ├── Configuration/
 │   │   │   ├── ProjectConfiguration.cs       (persistence.project.json model + loader)
 │   │   │   ├── DbDesignFileSchema.cs           (embedded JSON Schema for db-design.json validation)
@@ -162,7 +162,7 @@ pondhawk-mcp.slnx
 │   │   └── Caching/
 │   │       └── TimestampCache.cs             (file timestamp invalidation)
 │   │
-│   └── Pondhawk.Persistence.Mcp/             ← MCP server (thin layer)
+│   └── Pondhawk.Generation.Mcp/             ← MCP server (thin layer)
 │       ├── Program.cs                        (--project arg, stdio transport, Serilog/MEL wiring, server setup)
 │       └── Tools/
 │           ├── InitTool.cs
@@ -176,7 +176,7 @@ pondhawk-mcp.slnx
 │           └── UpdateTool.cs
 │
 ├── tests/
-│   ├── Pondhawk.Persistence.Core.Tests/      ← unit tests (xUnit)
+│   ├── Pondhawk.Generation.Tests/      ← unit tests (xUnit)
 │   │   ├── Configuration/
 │   │   │   ├── ProjectConfigurationTests.cs
 │   │   │   ├── EnvironmentResolverTests.cs
@@ -218,7 +218,7 @@ pondhawk-mcp.slnx
 │   │       ├── SampleConfigs/               (test persistence.project.json files)
 │   │       └── SampleTemplates/             (test .liquid template files)
 │   │
-│   └── Pondhawk.Persistence.Mcp.Tests/       ← MCP integration tests (xUnit)
+│   └── Pondhawk.Generation.Mcp.Tests/       ← MCP integration tests (xUnit)
 │       └── Tools/
 │           ├── InitToolTests.cs
 │           ├── IntrospectSchemaToolTests.cs
@@ -241,7 +241,7 @@ pondhawk-mcp.slnx
         └── PublishTask.cs                   (dotnet publish for all 4 RIDs)
 ```
 
-| Concern | `Pondhawk.Persistence.Core` | `Pondhawk.Persistence.Mcp` |
+| Concern | `Pondhawk.Generation` | `Pondhawk.Generation.Mcp` |
 |---------|---------------------------|--------------------------|
 | Config parsing + validation | Yes | |
 | .env + env var resolution | Yes | |
@@ -362,7 +362,7 @@ The MCP server is scoped to a single project. The project path is provided as a 
 {
   "mcpServers": {
     "pondhawk": {
-      "command": "pondhawk-persistence-mcp",
+      "command": "pondhawk-generation-mcp",
       "args": ["--project", "C:/projects/my-app"]
     }
   }
@@ -2232,7 +2232,7 @@ Table and view filtering supports glob-style wildcard patterns applied at both t
 
 All tests run without external dependencies (no external database servers required). Where tests need a real database (introspection, type mapping, relationship merging, end-to-end pipeline), they use **SQLite in-memory databases** (`Data Source=:memory:`) created and torn down per test. This exercises the real DatabaseSchemaReader and ADO.NET code paths rather than mocking them, providing significantly higher confidence. Pure logic tests (override resolution, variant resolution, template rendering, config parsing) continue to use mocked inputs where no database is involved.
 
-### `Pondhawk.Persistence.Core.Tests` — Unit Tests
+### `Pondhawk.Generation.Tests` — Unit Tests
 
 #### Configuration
 
@@ -2310,7 +2310,7 @@ All tests run without external dependencies (no external database servers requir
 |------------|--------|
 | `GeneratePipelineTests` | **Uses SQLite in-memory DB.** Full pipeline: create SQLite DB with tables/FKs/views → introspect schema → write `db-design.json` (introspected only) → apply type mappings → merge explicit relationships at generation time → apply overrides (variants, ignores, data types) → read `db-design.json` → render PerModel template → verify generated C# output contains correct class names, property types, navigation properties, and namespace. Also covers: SingleFile template (DbContext) renders with all entities, `SkipExisting` mode skips files that already exist, `Include`/`Exclude` filters reduce generated file set, views rendered when `IncludeViews=true`, views excluded when `IncludeViews=false`, dispatch tag resolves correct macros through the full pipeline, override `Ignore: true` removes properties from rendered output, explicit relationships added after introspection appear in generated output without re-introspecting |
 
-### `Pondhawk.Persistence.Mcp.Tests` — Integration Tests
+### `Pondhawk.Generation.Mcp.Tests` — Integration Tests
 
 | Test Class | Covers |
 |------------|--------|
@@ -2454,7 +2454,7 @@ The project uses **Cake Frosting** for build automation. Cake Frosting is a .NET
 
 ### Build Project
 
-The `build/` directory contains a standalone .NET 10 console application (`Build.csproj`) that references the `Cake.Frosting` NuGet package. It is **not** included in the main solution's build output — it is a development tool only. Build tasks reference the solution file at the repository root (`../pondhawk-mcp.slnx` relative to the build project).
+The `build/` directory contains a standalone .NET 10 console application (`Build.csproj`) that references the `Cake.Frosting` NuGet package. It is **not** included in the main solution's build output — it is a development tool only. Build tasks reference the solution file at the repository root (`../pondhawk-generation.slnx` relative to the build project).
 
 Run the build from the repository root:
 
@@ -2469,8 +2469,8 @@ dotnet run --project build -- --target <TaskName>
 | `Clean` | — | Deletes `bin/`, `obj/`, and `publish/` directories across all projects |
 | `Restore` | `Clean` | Runs `dotnet restore` on the solution |
 | `Build` | `Restore` | Runs `dotnet build` on the solution in `Release` configuration |
-| `Test` | `Build` | Runs `dotnet test` on both `Pondhawk.Persistence.Core.Tests` and `Pondhawk.Persistence.Mcp.Tests` |
-| `Publish` | `Test` | Publishes `Pondhawk.Persistence.Mcp` as self-contained, single-file executables for all target platforms |
+| `Test` | `Build` | Runs `dotnet test` on both `Pondhawk.Generation.Tests` and `Pondhawk.Generation.Mcp.Tests` |
+| `Publish` | `Test` | Publishes `Pondhawk.Generation.Mcp` as self-contained, single-file executables for all target platforms |
 
 The **default task** is `Test` — running the build with no target argument cleans, restores, builds, and tests.
 
@@ -2480,10 +2480,10 @@ The `Publish` task produces self-contained, single-file executables for each tar
 
 | Platform       | Runtime Identifier | Output Binary            |
 |----------------|--------------------|--------------------------|
-| Windows x64    | `win-x64`          | `pondhawk-persistence-mcp.exe`        |
-| macOS ARM64    | `osx-arm64`        | `pondhawk-persistence-mcp`            |
-| Linux x64      | `linux-x64`        | `pondhawk-persistence-mcp`            |
-| Linux ARM64    | `linux-arm64`      | `pondhawk-persistence-mcp`            |
+| Windows x64    | `win-x64`          | `pondhawk-generation-mcp.exe`        |
+| macOS ARM64    | `osx-arm64`        | `pondhawk-generation-mcp`            |
+| Linux x64      | `linux-x64`        | `pondhawk-generation-mcp`            |
+| Linux ARM64    | `linux-arm64`      | `pondhawk-generation-mcp`            |
 
 ### Publish Configuration
 
@@ -2504,13 +2504,13 @@ Output structure:
 ```
 publish/
 ├── win-x64/
-│   └── pondhawk-persistence-mcp.exe
+│   └── pondhawk-generation-mcp.exe
 ├── osx-arm64/
-│   └── pondhawk-persistence-mcp
+│   └── pondhawk-generation-mcp
 ├── linux-x64/
-│   └── pondhawk-persistence-mcp
+│   └── pondhawk-generation-mcp
 └── linux-arm64/
-    └── pondhawk-persistence-mcp
+    └── pondhawk-generation-mcp
 ```
 
 ### Trimming Considerations
@@ -2726,7 +2726,7 @@ A formal JSON Schema file (`db-design.schema.json`) provides validation and IDE 
 
 #### Architecture
 
-The DDL generator uses an interface `IDdlGenerator` with 4 implementations (SqlServer, PostgreSql, MySql, Sqlite), selected by a factory method based on the `provider` parameter. All implementations live in `Pondhawk.Persistence.Core/Ddl/`.
+The DDL generator uses an interface `IDdlGenerator` with 4 implementations (SqlServer, PostgreSql, MySql, Sqlite), selected by a factory method based on the `provider` parameter. All implementations live in `Pondhawk.Generation/Ddl/`.
 
 ```
 IDdlGenerator
@@ -2975,7 +2975,7 @@ Generates an interactive HTML ER diagram from `db-design.json` and writes it to 
 The new files added to the existing solution structure (see section 3 for the complete structure):
 
 ```
-src/Pondhawk.Persistence.Core/
+src/Pondhawk.Generation/
 ├── Configuration/
 │   └── DbDesignFileSchema.cs                 ← new (embedded JSON Schema for db-design.json,
 │                                              mirrors ProjectConfigurationSchema.cs pattern)
@@ -2990,12 +2990,12 @@ src/Pondhawk.Persistence.Core/
 ├── Diagrams/                               ← new directory
 │   └── DiagramGenerator.cs                 (HTML ER diagram generator)
 
-src/Pondhawk.Persistence.Mcp/
+src/Pondhawk.Generation.Mcp/
 ├── Tools/
 │   ├── GenerateDdlTool.cs                  ← new
 │   └── GenerateDiagramTool.cs              ← new
 
-tests/Pondhawk.Persistence.Core.Tests/
+tests/Pondhawk.Generation.Tests/
 ├── Ddl/                                    ← new directory
 │   ├── SqlServerDdlGeneratorTests.cs
 │   ├── PostgreSqlDdlGeneratorTests.cs
@@ -3005,7 +3005,7 @@ tests/Pondhawk.Persistence.Core.Tests/
 ├── Diagrams/                               ← new directory
 │   └── DiagramGeneratorTests.cs
 
-tests/Pondhawk.Persistence.Mcp.Tests/
+tests/Pondhawk.Generation.Mcp.Tests/
 ├── Tools/
 │   ├── GenerateDdlToolTests.cs             ← new
 │   └── GenerateDiagramToolTests.cs         ← new
@@ -3043,7 +3043,7 @@ The generated SQL files are designed for use with migration runners such as DbUp
 
 ### 17.2 Architecture
 
-Six components in `Pondhawk.Persistence.Core/Migrations/`:
+Six components in `Pondhawk.Generation/Migrations/`:
 
 | Component | Responsibility |
 |-----------|----------------|
@@ -3054,7 +3054,7 @@ Six components in `Pondhawk.Persistence.Core/Migrations/`:
 | `MigrationSqlRenderer` | Assembles the final SQL file with a header comment block and numbered statements |
 | `MigrationFileManager` | Handles version numbering, file naming, snapshot I/O, and migration history validation |
 
-Plus `GenerateMigrationTool` in `Pondhawk.Persistence.Mcp/Tools/` — the MCP tool that orchestrates the pipeline.
+Plus `GenerateMigrationTool` in `Pondhawk.Generation.Mcp/Tools/` — the MCP tool that orchestrates the pipeline.
 
 ### 17.3 Schema Differ
 
@@ -3118,7 +3118,7 @@ ALTER TABLE [dbo].[Users] ADD [DisplayName] VARCHAR(100) NOT NULL;
 ### 17.6 Solution Structure Additions
 
 ```
-src/Pondhawk.Persistence.Core/
+src/Pondhawk.Generation/
 ├── Migrations/                            ← new directory
 │   ├── SchemaChange.cs                   (abstract record + 12 sealed concrete records)
 │   ├── MigrationWarning.cs              (sealed record with WarningType enum)
@@ -3127,18 +3127,18 @@ src/Pondhawk.Persistence.Core/
 │   ├── MigrationSqlRenderer.cs          (static Render method)
 │   └── MigrationFileManager.cs          (versioning, file I/O, history validation)
 
-src/Pondhawk.Persistence.Mcp/
+src/Pondhawk.Generation.Mcp/
 ├── Tools/
 │   └── GenerateMigrationTool.cs          ← new
 
-tests/Pondhawk.Persistence.Core.Tests/
+tests/Pondhawk.Generation.Tests/
 ├── Migrations/                            ← new directory
 │   ├── SchemaDifferTests.cs
 │   ├── MigrationSqlGeneratorTests.cs
 │   ├── MigrationSqlRendererTests.cs
 │   └── MigrationFileManagerTests.cs
 
-tests/Pondhawk.Persistence.Mcp.Tests/
+tests/Pondhawk.Generation.Mcp.Tests/
 ├── Tools/
 │   └── GenerateMigrationToolTests.cs     ← new
 ```
