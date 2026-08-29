@@ -58,10 +58,7 @@ builder.Services
     .WithTools<GenerateTool>()
     .WithTools<ListTemplatesTool>()
     .WithTools<ValidateConfigTool>()
-    .WithTools<UpdateTool>()
-    .WithTools<GenerateDdlTool>()
-    .WithTools<GenerateDiagramTool>()
-    .WithTools<GenerateMigrationTool>();
+    .WithTools<UpdateTool>();
 
 var app = builder.Build();
 await app.RunAsync();

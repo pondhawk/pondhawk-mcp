@@ -19,11 +19,6 @@
         <PackageVersion Include="Serilog.Sinks.File" Version="7.0.0" />
         <PackageVersion Include="Serilog.Extensions.Logging" Version="10.0.0" />
 
-        <!-- DDL Generation -->
-        <PackageVersion Include="FluentMigrator.Runner.SqlServer" Version="8.0.1" />
-        <PackageVersion Include="FluentMigrator.Runner.Postgres" Version="8.0.1" />
-        <PackageVersion Include="FluentMigrator.Runner.MySql" Version="8.0.1" />
-        <PackageVersion Include="FluentMigrator.Runner.SQLite" Version="8.0.1" />
 
         <!-- JSON Schema Validation -->
         <PackageVersion Include="JsonSchema.Net" Version="9.0.0" />

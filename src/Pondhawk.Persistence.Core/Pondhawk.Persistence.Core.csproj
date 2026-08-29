@@ -19,15 +19,8 @@
         <PackageReference Include="Microsoft.Data.Sqlite" />
         <PackageReference Include="Humanizer.Core" />
         <PackageReference Include="JsonSchema.Net" />
-        <PackageReference Include="FluentMigrator.Runner.SqlServer" />
-        <PackageReference Include="FluentMigrator.Runner.Postgres" />
-        <PackageReference Include="FluentMigrator.Runner.MySql" />
-        <PackageReference Include="FluentMigrator.Runner.SQLite" />
     </ItemGroup>
 
-    <ItemGroup>
-        <EmbeddedResource Include="Diagrams\dagre.min.js" />
-    </ItemGroup>
 
     <ItemGroup>
         <InternalsVisibleTo Include="Pondhawk.Persistence.Core.Tests" />
