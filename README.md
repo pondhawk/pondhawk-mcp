@@ -154,7 +154,7 @@ Edit `model.json`, then author templates with one `Default<Kind>` macro per kind
 Validate the config, then generate
 ```
 
-`validate_config` reports unparseable templates, unknown filters, a model violating its schema, overrides matching no node, templates whose `AppliesTo` matches no kind in the model, and overrides naming a variant macro no template declares — all of which otherwise produce wrong output silently.
+`validate_config` reports unparseable templates, unknown filters, a model violating its schema, overrides matching no node, templates whose `AppliesTo` matches no kind in the model, a Kind nested under what a template renders that has no `Default<Kind>` macro, and overrides naming a variant macro no template declares.
 
 ## MCP Tools
 

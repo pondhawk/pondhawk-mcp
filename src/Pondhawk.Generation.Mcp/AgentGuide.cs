@@ -349,8 +349,9 @@ public static class AgentGuide
           says `Property` everywhere else creates a second convention and a second macro, and
           the set stops being uniform. The same goes for metadata keys: if existing properties
           carry `Type`, do not introduce `DataType`.
-        - **A new Kind needs a new macro.** `{% dispatch %}` on a Kind with no
-          `Default<Kind>` macro fails the file: it is not written, `generate` counts it under
+        - **A new Kind needs a new macro.** `validate_config` warns when a Kind beneath the
+          nodes a template renders has no macro, which is the cheap moment to find out.
+          Otherwise `{% dispatch %}` on a Kind with no `Default<Kind>` macro fails the file: it is not written, `generate` counts it under
           `Failed`, and `Success` is false. Every unresolved node in that file is reported at
           once, so a Kind missing its macro is one message rather than a queue of them.
         - **A misspelled `Variant` renders the default.** Dispatch falls back to
@@ -377,8 +378,9 @@ public static class AgentGuide
            state while writing one.
         4. Run `validate_config`. It reports unparseable templates, unknown filters, a model that
            violates its schema, overrides matching no node, templates whose `AppliesTo` matches no
-           Kind in the model, and — the one that matters most — an override naming a variant macro
-           the template does not declare.
+           Kind in the model, a Kind nested under what a template renders that has no
+           `Default<Kind>` macro to render it, and — the one that matters most — an override
+           naming a variant macro the template does not declare.
         5. Run `generate` with `dryRun: true` and read the diffs. Nothing is written. This is
            where a macro change shows its blast radius before you accept it, and where the two
            quiet failures become visible: a template that renders empty appears as

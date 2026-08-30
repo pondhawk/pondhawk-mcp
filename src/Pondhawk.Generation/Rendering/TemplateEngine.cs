@@ -31,6 +31,15 @@ public sealed partial class TemplateEngine
     [GeneratedRegex(@"\{%-?\s*macro\s+(\w+)\s*\(", RegexOptions.Compiled)]
     private static partial Regex MacroDeclarationRegex();
 
+    [GeneratedRegex(@"\{%-?\s*dispatch\b", RegexOptions.Compiled)]
+    private static partial Regex DispatchUsageRegex();
+
+    /// <summary>
+    /// Whether a template dispatches at all. A template that never does cannot fail for want
+    /// of a macro, so there is nothing to warn it about.
+    /// </summary>
+    public static bool UsesDispatch(string templateSource) => DispatchUsageRegex().IsMatch(templateSource);
+
     /// <summary>
     /// Names of the macros a template declares. Used to check that a variant named by an
     /// override actually resolves — dispatch falls back to Default&lt;Kind&gt; when it does

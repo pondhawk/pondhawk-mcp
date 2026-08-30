@@ -207,8 +207,10 @@ public static class ConfigurationValidator
                     // template. Extracting from this file alone would report a correct project
                     // as declaring no such macro — a false error on the check that exists to
                     // catch a silently-ignored override.
-                    macrosByTemplate[key] = TemplateEngine.ExtractMacroNames(
-                        TemplateComposer.Compose(partials, source));
+                    var composed = TemplateComposer.Compose(partials, source);
+                    macrosByTemplate[key] = TemplateEngine.ExtractMacroNames(composed);
+
+                    WarnUndispatchableKinds(key, template, composed, macrosByTemplate[key], model, modelFile, result);
                 }
             }
 
@@ -240,6 +242,48 @@ public static class ConfigurationValidator
 
         return macrosByTemplate;
     }
+
+    /// <summary>
+    /// Warns when a Kind nested under the nodes a template renders has no macro to render it.
+    /// </summary>
+    /// <remarks>
+    /// Dispatch is a runtime lookup, so which nodes a template actually reaches cannot be known
+    /// statically. This is therefore advisory and deliberately conservative: it says nothing
+    /// about a template that never dispatches, nothing about the top-level Kinds a template
+    /// usually renders in its own body, and nothing at all when there is no model to check
+    /// against. Missing a case is cheap — since dispatch fails the file outright, `generate`
+    /// will say so plainly — whereas a warning that cries wolf gets the whole list skipped.
+    /// </remarks>
+    private static void WarnUndispatchableKinds(
+        string key, TemplateConfig template, string composedSource, HashSet<string> macros,
+        ModelFile? model, string modelFile, ValidationResult result)
+    {
+        if (model is null || !TemplateEngine.UsesDispatch(composedSource))
+            return;
+
+        var reachable = model.Nodes
+            .Where(n => MatchesAppliesTo(n, template.AppliesTo))
+            .SelectMany(n => n.Descend())
+            .Where(d => d.Path.Contains('/'))  // the root itself is bound as item, not dispatched
+            .GroupBy(d => d.Node.Kind, StringComparer.Ordinal)
+            .OrderBy(g => g.Key, StringComparer.Ordinal);
+
+        foreach (var group in reachable)
+        {
+            if (macros.Contains($"Default{group.Key}"))
+                continue;
+
+            result.Warnings.Add(
+                $"Template '{key}': dispatches, but declares no macro 'Default{group.Key}' — "
+                + $"{modelFile} has {group.Count()} '{group.Key}' node(s) beneath the nodes this template renders. "
+                + "Dispatching one fails the file.");
+        }
+    }
+
+    private static bool MatchesAppliesTo(Node node, string? appliesTo)
+        => string.IsNullOrEmpty(appliesTo)
+           || appliesTo.Equals("All", StringComparison.OrdinalIgnoreCase)
+           || appliesTo.Equals(node.Kind, StringComparison.OrdinalIgnoreCase);
 
     private static void ValidateOverrides(
         ProjectConfiguration config,
