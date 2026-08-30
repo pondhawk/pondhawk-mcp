@@ -42,6 +42,24 @@ public sealed class TemplateConfig
     /// Restricts this template to nodes of one Kind. Empty or "All" matches every top-level node.
     /// </summary>
     public string? AppliesTo { get; set; }
+
+    /// <summary>
+    /// The model file this template renders, relative to the project. Empty means "model.json".
+    /// A project with two unrelated generation concerns — say entities edited by hand and an API
+    /// surface regenerated from a spec — keeps them in separate models rather than splicing both
+    /// into one document, and each template says which one it reads.
+    /// </summary>
+    public string? Model { get; set; }
+
+    /// <summary>
+    /// The model file this template reads, with the default applied. Derived from
+    /// <see cref="Model"/>, so it must never be written back into the config — the schema
+    /// forbids unknown properties and a round-trip through init or update would fail.
+    /// </summary>
+    [JsonIgnore]
+    public string ModelFile => string.IsNullOrWhiteSpace(Model) ? DefaultModelFile : Model;
+
+    public const string DefaultModelFile = "model.json";
 }
 
 /// <summary>

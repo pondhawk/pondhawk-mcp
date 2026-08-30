@@ -21,9 +21,10 @@ public sealed class TimestampCache
     private readonly Dictionary<string, DateTime> _templateTimestamps = new();
     private readonly Dictionary<string, IFluidTemplate> _compiledTemplates = new();
 
-    private string? _modelPath;
-    private DateTime _modelTimestamp;
-    private ModelFile? _cachedModel;
+    // Keyed by path: a project can declare several models, and switching between them on
+    // consecutive templates in one generate run must not evict the other.
+    private readonly Dictionary<string, DateTime> _modelTimestamps = new();
+    private readonly Dictionary<string, ModelFile> _cachedModels = new();
 
     public TimestampCache(TemplateEngine templateEngine)
     {
@@ -97,15 +98,17 @@ public sealed class TimestampCache
 
             var currentTimestamp = File.GetLastWriteTimeUtc(modelPath);
 
-            if (_cachedModel is not null && _modelPath == modelPath && _modelTimestamp == currentTimestamp)
+            if (_cachedModels.TryGetValue(modelPath, out var cached) &&
+                _modelTimestamps.TryGetValue(modelPath, out var cachedTs) &&
+                cachedTs == currentTimestamp)
             {
-                return _cachedModel;
+                return cached;
             }
 
-            _cachedModel = ModelFileLoader.Load(modelPath);
-            _modelPath = modelPath;
-            _modelTimestamp = currentTimestamp;
-            return _cachedModel;
+            var model = ModelFileLoader.Load(modelPath);
+            _cachedModels[modelPath] = model;
+            _modelTimestamps[modelPath] = currentTimestamp;
+            return model;
     }
     }
 
@@ -121,9 +124,8 @@ public sealed class TimestampCache
             _configTimestamp = default;
             _templateTimestamps.Clear();
             _compiledTemplates.Clear();
-            _cachedModel = null;
-            _modelPath = null;
-            _modelTimestamp = default;
+            _cachedModels.Clear();
+            _modelTimestamps.Clear();
     }
     }
 

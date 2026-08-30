@@ -8,7 +8,7 @@ namespace Pondhawk.Generation.Mcp.Tools;
 [McpServerToolType]
 public sealed class ListTemplatesTool
 {
-    [McpServerTool(Name = "list_templates"), Description("Lists the templates the project configuration declares. Returns JSON: each template key with its path, output pattern, scope, mode, and the node Kind it applies to.")]
+    [McpServerTool(Name = "list_templates"), Description("Lists the templates the project configuration declares. Returns JSON: each template key with its path, output pattern, scope, mode, the node Kind it applies to, and the model file it reads.")]
     public static string Execute(ServerContext ctx)
     {
         var (logger, sw) = ctx.StartToolCall("list_templates");
@@ -23,7 +23,9 @@ public sealed class ListTemplatesTool
             kvp.Value.Mode,
             // An agent choosing which template to run needs to know which Kind it selects;
             // without it the listing cannot be matched against the nodes in the model.
-            kvp.Value.AppliesTo
+            kvp.Value.AppliesTo,
+            // Resolved rather than raw, so the listing always names the file to read.
+            Model = kvp.Value.ModelFile
         }).ToList();
 
         sw.Stop();

@@ -31,6 +31,11 @@ public static class AgentGuide
           templates/*.liquid     how to generate it -- one `Default<Kind>` macro per Kind
           pondhawk.project.json  which templates run, where output goes, and overrides
 
+        A template reads model.json unless its `Model` field names another file, so a project
+        with unrelated concerns -- entities edited by hand, an API surface regenerated from a
+        spec -- keeps them in separate models instead of one crowded document. Each model has
+        its own root, and `list_templates` reports which one every template reads.
+
         `{% dispatch node %}` in a template calls the macro matching that node's Kind, which
         is what keeps a generated set uniform. An override can point a single node at a
         `<Variant><Kind>` macro instead.
@@ -78,7 +83,7 @@ public static class AgentGuide
         | File | Purpose |
         |------|---------|
         | `pondhawk.project.json` | Configuration: templates, output directory, values, overrides |
-        | `model.json` | The input model — what to generate |
+        | `model.json` | The default input model — what to generate |
         | `templates/*.liquid` | The templates — how to generate it |
         | `AGENTS.md` | This file |
         | `.env` | Values kept out of version control |
@@ -193,7 +198,30 @@ public static class AgentGuide
         - **Scope** — `PerItem` renders one file per matching node; `Single` renders one file for all.
         - **Mode** — `Always` overwrites every run; `SkipExisting` writes once and then leaves it alone.
         - **AppliesTo** — restricts a template to top-level nodes of one Kind. Omit for all.
+        - **Model** — the model file this template reads. Omit for `model.json`.
         - **Values** — anything templates need. String values support `${VAR}` from `.env`.
+
+        ### More than one model
+
+        A project with unrelated generation concerns keeps them in separate models rather than
+        splicing both into one document, and each template says which one it reads:
+
+        ```json
+        "Templates": {
+          "entity":     { "Path": "templates/entity.liquid", "AppliesTo": "Class" },
+          "api-client": { "Path": "templates/client.liquid", "Model": "api.model.json" }
+        }
+        ```
+
+        Each model is a whole document: its own `Name`, its own root metadata, its own Kind
+        vocabulary. `{{ model }}` in a template is the root of the model *that* template reads.
+        Two concerns sharing one file would have to share one root, and a model regenerated from
+        an upstream source — an OpenAPI document, a database — would have to be spliced into a
+        file that also holds hand-written content.
+
+        Nothing forces the split. A single `model.json` partitioned by `AppliesTo` is the right
+        answer while the concerns are small and stable; reach for a second model when they have
+        genuinely different lifecycles.
 
         ### The two-file pattern
 

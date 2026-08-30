@@ -74,6 +74,10 @@ public static class ProjectConfigurationSchema
                 "AppliesTo": {
                   "type": "string",
                   "description": "Restricts this template to top-level nodes of one Kind. Omit or use 'All' to match every node."
+                },
+                "Model": {
+                  "type": "string",
+                  "description": "The model file this template renders, relative to the project. Omit for 'model.json'. Use a separate model when a project has unrelated generation concerns."
                 }
               },
               "required": ["Path", "OutputPattern", "Scope", "Mode"],

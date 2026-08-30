@@ -26,21 +26,6 @@ public sealed class GenerateTool
         var (logger, sw) = ctx.StartToolCall("generate");
         var config = ctx.EnsureConfig();
 
-        var model = ctx.Cache.GetModel(ctx.ModelPath);
-        if (model is null)
-        {
-            logger.LogError("Tool generate failed — model.json not found");
-            throw new InvalidOperationException(
-                "model.json not found. Write an input model describing the nodes to generate, then run generate again.");
-        }
-
-        var roots = model.Nodes;
-        if (items is { Length: > 0 })
-        {
-            var names = new HashSet<string>(items, StringComparer.OrdinalIgnoreCase);
-            roots = roots.Where(n => names.Contains(n.Name)).ToList();
-        }
-
         var templateEntries = config.Templates.AsEnumerable();
         if (templates is { Length: > 0 })
         {
@@ -55,8 +40,22 @@ public sealed class GenerateTool
         var filesWritten = new List<object>();
         int created = 0, overwritten = 0, skipped = 0, failed = 0;
 
+        // Templates may read different models, so each one is loaded on demand and cached for
+        // the run. A missing model is a project-setup error like an uncompilable template, not a
+        // per-node data error, so it stops the run rather than being tallied as a failed file.
+        var modelsByFile = new Dictionary<string, ModelFile>(StringComparer.OrdinalIgnoreCase);
+
         foreach (var (templateKey, templateConfig) in templateEntries)
         {
+            var model = LoadModel(ctx, templateConfig, templateKey, modelsByFile, logger);
+
+            var roots = model.Nodes;
+            if (items is { Length: > 0 })
+            {
+                var names = new HashSet<string>(items, StringComparer.OrdinalIgnoreCase);
+                roots = roots.Where(n => names.Contains(n.Name)).ToList();
+            }
+
             var templatePath = Path.IsPathRooted(templateConfig.Path)
                 ? templateConfig.Path
                 : Path.Combine(ctx.ProjectDir, templateConfig.Path);
@@ -159,6 +158,30 @@ public sealed class GenerateTool
             FilesWritten = filesWritten,
             Summary = string.Join(", ", parts)
         }, new JsonSerializerOptions { WriteIndented = true });
+    }
+
+    private static ModelFile LoadModel(
+        ServerContext ctx,
+        TemplateConfig templateConfig,
+        string templateKey,
+        Dictionary<string, ModelFile> cache,
+        ILogger logger)
+    {
+        var modelFile = templateConfig.ModelFile;
+        if (cache.TryGetValue(modelFile, out var cached))
+            return cached;
+
+        var model = ctx.Cache.GetModel(Path.Combine(ctx.ProjectDir, modelFile));
+        if (model is null)
+        {
+            logger.LogError("Tool generate failed — model '{ModelFile}' not found", modelFile);
+            throw new InvalidOperationException(
+                $"{modelFile} not found (read by template '{templateKey}'). "
+                + "Write an input model describing the nodes to generate, then run generate again.");
+        }
+
+        cache[modelFile] = model;
+        return model;
     }
 
     private static TemplateContext CreateContext(

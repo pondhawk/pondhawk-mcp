@@ -194,9 +194,31 @@ All settings live in `pondhawk.project.json`:
 - **Scope** — `PerItem` renders one file per matching node; `Single` renders one file for all.
 - **Mode** — `Always` overwrites every run; `SkipExisting` writes once and then leaves the file alone.
 - **AppliesTo** — restricts a template to top-level nodes of one `Kind`. Omit for all.
+- **Model** — the model file this template reads. Omit for `model.json`.
 - **Values** — anything templates need, as `{{ values.X }}`. String values support `${VAR}` substitution from `.env`.
 
 Rendered output paths are confined to `OutputDir`. A node name containing `..` or a leading separator is refused rather than written elsewhere, and `generate` returns `Success: false` with the offending file listed.
+
+### More than one model
+
+A project with unrelated generation concerns keeps them in separate models rather than splicing
+both into one document. Each template names the one it reads:
+
+```json
+"Templates": {
+  "entity":     { "Path": "templates/entity.liquid", "AppliesTo": "Class" },
+  "api-client": { "Path": "templates/client.liquid", "Model": "api.model.json" }
+}
+```
+
+Each model is a whole document — its own `Name`, its own root metadata, its own `Kind`
+vocabulary — and `{{ model }}` in a template is the root of the one that template reads. The
+case this exists for is divergent lifecycles: an entity model edited by hand and an API model
+regenerated from an OpenAPI document have no business sharing a file, because the regeneration
+would have to splice into hand-written content.
+
+Nothing forces the split. A single `model.json` partitioned by `AppliesTo` is the right answer
+while the concerns are small and stable.
 
 ### The two-file pattern
 
