@@ -20,7 +20,10 @@ public sealed class ListTemplatesTool
             kvp.Value.Path,
             kvp.Value.OutputPattern,
             kvp.Value.Scope,
-            kvp.Value.Mode
+            kvp.Value.Mode,
+            // An agent choosing which template to run needs to know which Kind it selects;
+            // without it the listing cannot be matched against the nodes in the model.
+            kvp.Value.AppliesTo
         }).ToList();
 
         sw.Stop();

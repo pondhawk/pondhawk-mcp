@@ -80,4 +80,26 @@ public class ListTemplatesToolTests : IDisposable
         tmpl.GetProperty("Scope").GetString().ShouldBe("PerItem");
         tmpl.GetProperty("Mode").GetString().ShouldBe("SkipExisting");
     }
+
+    [Fact]
+    public void ListTemplates_ReportsTheKindEachTemplateAppliesTo()
+    {
+        // An agent picks a template by matching AppliesTo against the Kinds in the model,
+        // so a listing without it cannot be acted on.
+        var config = new ProjectConfiguration
+        {
+            Templates = new Dictionary<string, TemplateConfig>
+            {
+                ["entity"] = new() { Path = "t.liquid", OutputPattern = "{{ item.Name }}.cs", Scope = "PerItem", Mode = "Always", AppliesTo = "Class" },
+                ["index"] = new() { Path = "i.liquid", OutputPattern = "Index.cs", Scope = "Single", Mode = "Always" }
+            }
+        };
+        ProjectConfigurationLoader.Save(Path.Combine(_tempDir, "pondhawk.project.json"), config);
+
+        var templates = JsonDocument.Parse(ListTemplatesTool.Execute(new ServerContext(_tempDir)))
+            .RootElement.GetProperty("Templates");
+
+        templates[0].GetProperty("AppliesTo").GetString().ShouldBe("Class");
+        templates[1].GetProperty("AppliesTo").ValueKind.ShouldBe(JsonValueKind.Null);
+    }
 }
