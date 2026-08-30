@@ -13,6 +13,7 @@ public class AgentGuideTests
     [
         typeof(InitTool),
         typeof(GenerateTool),
+        typeof(CheckTool),
         typeof(ListTemplatesTool),
         typeof(ValidateConfigTool),
         typeof(UpdateTool)

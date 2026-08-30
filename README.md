@@ -141,7 +141,8 @@ Validate the config, then generate
 | Tool | Description |
 |------|-------------|
 | `init` | Scaffolds a new project with config, model, templates, schemas, and AGENTS.md |
-| `generate` | Renders templates against `model.json` and writes files |
+| `generate` | Renders templates against the model and writes files; `dryRun: true` reports what would change instead, with unified diffs, and writes nothing |
+| `check` | Reports whether the files on disk are what the model and templates currently produce |
 | `list_templates` | Lists configured templates with their settings |
 | `validate_config` | Checks config, templates, and model without generating |
 | `update` | Refreshes AGENTS.md and JSON schemas after a server upgrade |

@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Text.Json;
 using Pondhawk.Generation.Configuration;
 using Pondhawk.Generation.Models;
@@ -13,7 +14,7 @@ namespace Pondhawk.Generation.Mcp.Tools;
 [McpServerToolType]
 public sealed class GenerateTool
 {
-    [McpServerTool(Name = "generate"), Description("Renders the configured Liquid templates against the nodes in model.json and writes the files to disk. Returns JSON: Success, per-file Created/Overwritten/Skipped/Failed counts, and the failures themselves. Generation is per-file, so check the counts rather than assuming a returned result means everything was written.")]
+    [McpServerTool(Name = "generate"), Description("Renders the configured Liquid templates against the nodes in their model and writes the files to disk. Returns JSON: Success, per-file Created/Overwritten/Skipped/Failed counts, and the failures themselves. Generation is per-file, so check the counts rather than assuming a returned result means everything was written. Pass dryRun to see what would change — unified diffs, nothing written — before committing to a run.")]
     public static string Execute(
         ServerContext ctx,
         [Description("Template keys to run (default: all)")]
@@ -21,117 +22,43 @@ public sealed class GenerateTool
         [Description("Exact top-level node names to generate for (overrides a template's AppliesTo)")]
         string[]? items = null,
         [Description("Additional key-value pairs passed to the template context as {{ parameters.X }}")]
-        Dictionary<string, object>? parameters = null)
+        Dictionary<string, object>? parameters = null,
+        [Description("Render and report what would change without writing anything. Returns WouldCreate/WouldOverwrite/Unchanged/WouldSkip counts and a unified diff for each file whose content would change.")]
+        bool dryRun = false)
     {
-        var (logger, sw) = ctx.StartToolCall("generate");
+        var (logger, sw) = ctx.StartToolCall("generate", dryRun ? "dryRun=true" : null);
         var config = ctx.EnsureConfig();
 
-        var templateEntries = config.Templates.AsEnumerable();
-        if (templates is { Length: > 0 })
-        {
-            var keys = new HashSet<string>(templates, StringComparer.OrdinalIgnoreCase);
-            templateEntries = templateEntries.Where(t => keys.Contains(t.Key));
-        }
+        var plan = GenerationPlanner.Build(ctx, config, templates, items, parameters, logger);
 
-        var outputDir = Path.IsPathRooted(config.OutputDir)
-            ? config.OutputDir
-            : Path.Combine(ctx.ProjectDir, config.OutputDir);
+        return dryRun
+            ? Preview(plan, sw, logger)
+            : Write(plan, sw, logger);
+    }
 
+    private static string Write(GenerationPlan plan, Stopwatch sw, ILogger logger)
+    {
         var filesWritten = new List<object>();
-        int created = 0, overwritten = 0, skipped = 0, failed = 0;
+        int created = 0, overwritten = 0, skipped = plan.DroppedByOverride, failed = plan.Failures.Count;
 
-        // Templates may read different models, so each one is loaded on demand and cached for
-        // the run. A missing model is a project-setup error like an uncompilable template, not a
-        // per-node data error, so it stops the run rather than being tallied as a failed file.
-        var modelsByFile = new Dictionary<string, ModelFile>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var (templateKey, templateConfig) in templateEntries)
+        foreach (var file in plan.Files)
         {
-            var model = LoadModel(ctx, templateConfig, templateKey, modelsByFile, logger);
-
-            var roots = model.Nodes;
-            if (items is { Length: > 0 })
-            {
-                var names = new HashSet<string>(items, StringComparer.OrdinalIgnoreCase);
-                roots = roots.Where(n => names.Contains(n.Name)).ToList();
-            }
-
-            var templatePath = Path.IsPathRooted(templateConfig.Path)
-                ? templateConfig.Path
-                : Path.Combine(ctx.ProjectDir, templateConfig.Path);
-
-            IFluidTemplate compiledTemplate;
             try
             {
-                compiledTemplate = ctx.Cache.GetTemplate(templatePath);
+                var result = FileWriter.WriteResolved(file.FullPath, file.Content, file.Mode);
+                filesWritten.Add(new { file.RelativePath, result.Action });
+                Tally(result.Action, ref created, ref overwritten, ref skipped);
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Tool generate failed — could not compile template '{TemplateKey}'", templateKey);
-                throw new InvalidOperationException($"Failed to compile template '{templateKey}': {ex.Message}", ex);
-            }
-
-            var artifactName = templateKey;
-            var matching = roots.Where(n => MatchesAppliesTo(n, templateConfig.AppliesTo)).ToList();
-
-            if (templateConfig.Scope.Equals("PerItem", StringComparison.OrdinalIgnoreCase))
-            {
-                foreach (var node in matching)
-                {
-                    try
-                    {
-                        // Clone before overrides so per-artifact variants and metadata never
-                        // leak into the next template or survive to the next generate call.
-                        var resolved = OverrideResolver.Apply([node.Clone()], artifactName, config.Overrides);
-                        if (resolved.Count == 0)
-                        {
-                            skipped++;
-                            continue;
-                        }
-
-                        var context = CreateContext(ctx, config, model, parameters, artifactName);
-                        context.SetValue("item", FluidValue.Create(resolved[0], context.Options));
-
-                        var content = ctx.TemplateEngine.Render(compiledTemplate, context);
-                        var outputFileName = ResolveOutputPattern(ctx, templateConfig.OutputPattern, resolved[0]);
-                        var result = FileWriter.WriteFile(outputDir, outputFileName, content, templateConfig.Mode);
-
-                        filesWritten.Add(new { Path = Path.GetRelativePath(outputDir, result.Path), result.Action });
-                        Tally(result.Action, ref created, ref overwritten, ref skipped);
-                    }
-                    catch (Exception ex)
-                    {
-                        logger.LogError(ex, "Tool generate — failed to render template '{TemplateKey}' for node '{NodeName}'", templateKey, node.Name);
-                        filesWritten.Add(new { Path = $"{templateKey}/{node.Name}", Action = "Failed", Error = ex.Message });
-                        failed++;
-                    }
-                }
-            }
-            else // Single
-            {
-                try
-                {
-                    var resolved = OverrideResolver.Apply(
-                        matching.Select(n => n.Clone()).ToList(), artifactName, config.Overrides);
-
-                    var context = CreateContext(ctx, config, model, parameters, artifactName);
-                    context.SetValue("items", FluidValue.Create(resolved, context.Options));
-
-                    var content = ctx.TemplateEngine.Render(compiledTemplate, context);
-                    var outputFileName = ResolveOutputPattern(ctx, templateConfig.OutputPattern, null);
-                    var result = FileWriter.WriteFile(outputDir, outputFileName, content, templateConfig.Mode);
-
-                    filesWritten.Add(new { Path = Path.GetRelativePath(outputDir, result.Path), result.Action });
-                    Tally(result.Action, ref created, ref overwritten, ref skipped);
-                }
-                catch (Exception ex)
-                {
-                    logger.LogError(ex, "Tool generate — failed to render Single-scope template '{TemplateKey}'", templateKey);
-                    filesWritten.Add(new { Path = templateKey, Action = "Failed", Error = ex.Message });
-                    failed++;
-                }
+                logger.LogError(ex, "Tool generate — failed to write '{Path}'", file.RelativePath);
+                filesWritten.Add(new { file.RelativePath, Action = "Failed", Error = ex.Message });
+                failed++;
             }
         }
+
+        foreach (var failure in plan.Failures)
+            filesWritten.Add(new { RelativePath = failure.Reference, Action = "Failed", failure.Error });
 
         // Failures lead: a caller skimming the summary should not have to reach the end of
         // the sentence to discover the run produced nothing but errors.
@@ -154,37 +81,93 @@ public sealed class GenerateTool
             Overwritten = overwritten,
             Skipped = skipped,
             Failed = failed,
-            OutputDir = outputDir,
+            OutputDir = plan.OutputDir,
             FilesWritten = filesWritten,
             Summary = string.Join(", ", parts)
         }, new JsonSerializerOptions { WriteIndented = true });
     }
 
-    private static ModelFile LoadModel(
-        ServerContext ctx,
-        TemplateConfig templateConfig,
-        string templateKey,
-        Dictionary<string, ModelFile> cache,
-        ILogger logger)
+    /// <summary>
+    /// Reports what a run would do. The counts use "Would" names and the file list is called
+    /// FilesPlanned so that a dry-run result can never be mistaken for a completed one — the
+    /// same reason the real run reports failures rather than a bare success.
+    /// </summary>
+    private static string Preview(GenerationPlan plan, Stopwatch sw, ILogger logger)
     {
-        var modelFile = templateConfig.ModelFile;
-        if (cache.TryGetValue(modelFile, out var cached))
-            return cached;
+        var files = new List<object>();
+        int create = 0, overwrite = 0, unchanged = 0, skipped = plan.DroppedByOverride;
 
-        var model = ctx.Cache.GetModel(Path.Combine(ctx.ProjectDir, modelFile));
-        if (model is null)
+        foreach (var file in plan.Files)
         {
-            logger.LogError("Tool generate failed — model '{ModelFile}' not found", modelFile);
-            throw new InvalidOperationException(
-                $"{modelFile} not found (read by template '{templateKey}'). "
-                + "Write an input model describing the nodes to generate, then run generate again.");
+            var outcome = FileWriter.Decide(file.FullPath, file.Content, file.Mode, compareContent: true);
+
+            switch (outcome)
+            {
+                case WriteOutcome.Create:
+                    create++;
+                    files.Add(new { file.RelativePath, Action = "WouldCreate", Lines = LineCount(file.Content) });
+                    break;
+
+                case WriteOutcome.Overwrite:
+                    overwrite++;
+                    files.Add(new
+                    {
+                        file.RelativePath,
+                        Action = "WouldOverwrite",
+                        Diff = UnifiedDiff.Create(File.ReadAllText(file.FullPath), file.Content, file.RelativePath)
+                    });
+                    break;
+
+                case WriteOutcome.Unchanged:
+                    unchanged++;
+                    files.Add(new { file.RelativePath, Action = "Unchanged" });
+                    break;
+
+                default:
+                    skipped++;
+                    files.Add(new
+                    {
+                        file.RelativePath,
+                        Action = outcome == WriteOutcome.Empty ? "WouldSkipEmpty" : "WouldSkipExisting"
+                    });
+                    break;
+            }
         }
 
-        cache[modelFile] = model;
-        return model;
+        foreach (var failure in plan.Failures)
+            files.Add(new { RelativePath = failure.Reference, Action = "Failed", failure.Error });
+
+        var parts = new List<string>();
+        if (plan.Failures.Count > 0) parts.Add($"{plan.Failures.Count} files FAILED to render");
+        if (overwrite > 0) parts.Add($"{overwrite} files would change");
+        if (create > 0) parts.Add($"{create} files would be created");
+        if (skipped > 0) parts.Add($"{skipped} files would be skipped");
+        if (unchanged > 0) parts.Add($"{unchanged} files already current");
+        if (parts.Count == 0) parts.Add("nothing to generate — no nodes matched any template");
+
+        sw.Stop();
+        logger.LogInformation("Tool generate (dry run) completed in {Duration}ms — {Summary}", sw.ElapsedMilliseconds, string.Join(", ", parts));
+
+        return JsonSerializer.Serialize(new
+        {
+            DryRun = true,
+            NothingWritten = true,
+            Success = plan.Failures.Count == 0,
+            WouldCreate = create,
+            WouldOverwrite = overwrite,
+            Unchanged = unchanged,
+            WouldSkip = skipped,
+            Failed = plan.Failures.Count,
+            OutputDir = plan.OutputDir,
+            FilesPlanned = files,
+            Summary = string.Join(", ", parts)
+        }, new JsonSerializerOptions { WriteIndented = true });
     }
 
-    private static TemplateContext CreateContext(
+    private static int LineCount(string content) =>
+        content.Length == 0 ? 0 : content.Split('\n').Length;
+
+    internal static TemplateContext CreateContext(
         ServerContext ctx,
         ProjectConfiguration config,
         ModelFile model,
@@ -212,7 +195,7 @@ public sealed class GenerateTool
         }
     }
 
-    private static string ResolveOutputPattern(ServerContext ctx, string pattern, Node? item)
+    internal static string ResolveOutputPattern(ServerContext ctx, string pattern, Node? item)
     {
         if (!ctx.TemplateEngine.TryParse(pattern, out var tmpl, out _))
             return pattern;
@@ -228,8 +211,4 @@ public sealed class GenerateTool
     /// A template with no AppliesTo, or "All", renders every top-level node; otherwise it is
     /// restricted to nodes of that Kind.
     /// </summary>
-    private static bool MatchesAppliesTo(Node node, string? appliesTo)
-        => string.IsNullOrEmpty(appliesTo)
-           || appliesTo.Equals("All", StringComparison.OrdinalIgnoreCase)
-           || appliesTo.Equals(node.Kind, StringComparison.OrdinalIgnoreCase);
 }

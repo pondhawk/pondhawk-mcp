@@ -44,8 +44,11 @@ public static class AgentGuide
         Read it before extending it and reuse the Kinds and metadata keys already in use;
         introducing a second convention is the usual way a generated set stops being uniform.
 
-        The loop is: edit the model or templates, run `validate_config`, then `generate`. Both
-        are cheap and results are cached between calls, so run them freely while iterating.
+        The loop is: edit the model or templates, run `validate_config`, then `generate` with
+        `dryRun: true` to read the diffs, then `generate` for real. All are cheap and results
+        are cached between calls, so run them freely while iterating. `check` answers a
+        separate question -- are the files on disk already what the model produces -- and is
+        what to run after pulling a branch.
 
         Two failure modes are quiet and worth guarding against explicitly:
 
@@ -53,7 +56,8 @@ public static class AgentGuide
             Overwritten, Skipped and Failed counts. Check them; do not assume a returned
             result means every file was written.
           - A template that renders empty is skipped, and an unknown metadata key renders as
-            nothing rather than failing. After a run that matters, open a generated file.
+            nothing rather than failing. A dry run makes both visible before they reach disk;
+            after a run that matters, open a generated file.
 
         `validate_config` catches the rest before anything is written -- unparseable
         templates, unknown filters, a model that violates its schema, overrides that match no
@@ -274,7 +278,8 @@ public static class AgentGuide
         | Tool | Purpose |
         |------|---------|
         | `init` | Scaffolds a new project |
-        | `generate` | Renders templates and writes files |
+        | `generate` | Renders templates and writes files; `dryRun: true` reports what would change instead |
+        | `check` | Reports whether the files on disk are what the model and templates produce |
         | `list_templates` | Lists configured templates |
         | `validate_config` | Checks config, templates and model without generating |
         | `update` | Refreshes AGENTS.md and JSON schemas after upgrading pondhawk |
@@ -318,12 +323,21 @@ public static class AgentGuide
            violates its schema, overrides matching no node, templates whose `AppliesTo` matches no
            Kind in the model, and — the one that matters most — an override naming a variant macro
            the template does not declare.
-        5. Run `generate`.
-        6. Check `Success` in the `generate` result, then read a generated file. A template that
-           renders empty is skipped silently, and an unknown metadata key renders as nothing
-           rather than failing.
+        5. Run `generate` with `dryRun: true` and read the diffs. Nothing is written. This is
+           where a macro change shows its blast radius before you accept it, and where the two
+           quiet failures become visible: a template that renders empty appears as
+           `WouldSkipEmpty` rather than vanishing, and a metadata key that resolves to nothing
+           shows up as a hole in the diff.
+        6. Run `generate`.
+        7. Check `Success` in the result, then read a generated file.
 
-        Steps 4 and 5 are cheap and the model is cached between calls, so run them as often as
+        Steps 4 to 6 are cheap and the model is cached between calls, so run them as often as
         you like while iterating.
+
+        `check` answers a different question: are the files on disk already what the model
+        produces? Run it after pulling a branch, or before trusting generated code you did not
+        just generate. It writes nothing and reports every stale file with a reason — `Missing`
+        or `Differs` — but no diffs; use `generate` with `dryRun` for those. A `SkipExisting`
+        stub that exists is never stale, because `generate` would not touch it.
         """;
 }

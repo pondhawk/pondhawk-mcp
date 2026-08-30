@@ -2,6 +2,25 @@ using System.Text;
 
 namespace Pondhawk.Generation.Rendering;
 
+/// <summary>What writing a given content to a given path would do, or did.</summary>
+public enum WriteOutcome
+{
+    /// <summary>Content was blank; nothing is written.</summary>
+    Empty,
+
+    /// <summary>The file exists and the template is SkipExisting; it belongs to the developer now.</summary>
+    SkippedExisting,
+
+    /// <summary>No file there yet.</summary>
+    Create,
+
+    /// <summary>A file is there and its content differs.</summary>
+    Overwrite,
+
+    /// <summary>A file is there and already holds exactly this content.</summary>
+    Unchanged
+}
+
 public sealed class FileWriteResult
 {
     public string Path { get; set; } = "";
@@ -17,20 +36,18 @@ public static class FileWriter
     /// The path is resolved and checked for containment first — see <see cref="ResolveContained"/>.
     /// </summary>
     public static FileWriteResult WriteFile(string rootDir, string relativePath, string content, string mode)
+        => WriteResolved(ResolveContained(rootDir, relativePath), content, mode);
+
+    /// <summary>
+    /// Writes to an already-resolved path. Callers that planned the write earlier — a dry run
+    /// deciding what a real run would do — resolve once and reuse the result.
+    /// </summary>
+    public static FileWriteResult WriteResolved(string fullPath, string content, string mode)
     {
-        var fullPath = ResolveContained(rootDir, relativePath);
+        var outcome = Decide(fullPath, content, mode, compareContent: false);
 
-        if (string.IsNullOrWhiteSpace(content))
-        {
-            return new FileWriteResult { Path = fullPath, Action = "SkippedEmpty" };
-        }
-
-        var exists = File.Exists(fullPath);
-
-        if (mode.Equals("SkipExisting", StringComparison.OrdinalIgnoreCase) && exists)
-        {
-            return new FileWriteResult { Path = fullPath, Action = "SkippedExisting" };
-        }
+        if (outcome is not (WriteOutcome.Create or WriteOutcome.Overwrite))
+            return new FileWriteResult { Path = fullPath, Action = ActionName(outcome) };
 
         var dir = System.IO.Path.GetDirectoryName(fullPath);
         if (!string.IsNullOrEmpty(dir))
@@ -38,12 +55,44 @@ public static class FileWriter
 
         File.WriteAllText(fullPath, content, Utf8NoBom);
 
-        return new FileWriteResult
-        {
-            Path = fullPath,
-            Action = exists ? "Overwritten" : "Created"
-        };
+        return new FileWriteResult { Path = fullPath, Action = ActionName(outcome) };
     }
+
+    /// <summary>
+    /// Decides what writing this content to this path would do. The write path and the dry run
+    /// both go through here, so a preview cannot disagree with the run it is previewing.
+    /// </summary>
+    /// <param name="compareContent">
+    /// When true, an existing file holding identical content reports
+    /// <see cref="WriteOutcome.Unchanged"/> instead of <see cref="WriteOutcome.Overwrite"/>.
+    /// Only a caller that is not going to write needs that distinction, and it costs a read.
+    /// </param>
+    public static WriteOutcome Decide(string fullPath, string content, string mode, bool compareContent)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+            return WriteOutcome.Empty;
+
+        var exists = File.Exists(fullPath);
+
+        if (exists && mode.Equals("SkipExisting", StringComparison.OrdinalIgnoreCase))
+            return WriteOutcome.SkippedExisting;
+
+        if (!exists)
+            return WriteOutcome.Create;
+
+        if (compareContent && File.ReadAllText(fullPath) == content)
+            return WriteOutcome.Unchanged;
+
+        return WriteOutcome.Overwrite;
+    }
+
+    private static string ActionName(WriteOutcome outcome) => outcome switch
+    {
+        WriteOutcome.Empty => "SkippedEmpty",
+        WriteOutcome.SkippedExisting => "SkippedExisting",
+        WriteOutcome.Create => "Created",
+        _ => "Overwritten"
+    };
 
     /// <summary>
     /// Resolves an output path beneath a root directory, refusing anything that escapes it.
