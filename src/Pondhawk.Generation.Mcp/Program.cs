@@ -51,13 +51,18 @@ builder.Services
             Name = "pondhawk-generation",
             Version = "1.0.0"
         };
+
+        // Sent in the initialize handshake. Without it a connecting agent is told only the
+        // tool names, and has to infer the model/templates/config workflow from them.
+        options.ServerInstructions = AgentGuide.ServerInstructions;
     })
     .WithStdioServerTransport()
     .WithTools<InitTool>()
     .WithTools<GenerateTool>()
     .WithTools<ListTemplatesTool>()
     .WithTools<ValidateConfigTool>()
-    .WithTools<UpdateTool>();
+    .WithTools<UpdateTool>()
+    .WithResources<AgentGuideResource>();
 
 var app = builder.Build();
 await app.RunAsync();

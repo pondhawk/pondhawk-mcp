@@ -11,7 +11,7 @@ namespace Pondhawk.Generation.Mcp.Tools;
 [McpServerToolType]
 public sealed class UpdateTool
 {
-    [McpServerTool(Name = "update"), Description("Updates AGENTS.md and the JSON schemas to the latest version, and normalizes pondhawk.project.json. Run after upgrading pondhawk.")]
+    [McpServerTool(Name = "update"), Description("Rewrites AGENTS.md and the JSON schemas to match this binary and normalizes pondhawk.project.json. Returns the list of files updated. Run after upgrading pondhawk; it does not touch model.json or the templates.")]
     public static string Execute(ServerContext ctx)
     {
         var (logger, sw) = ctx.StartToolCall("update");
@@ -26,7 +26,7 @@ public sealed class UpdateTool
         var filesUpdated = new List<string>();
 
         // Overwrite AGENTS.md with latest embedded content
-        File.WriteAllText(Path.Combine(ctx.ProjectDir, "AGENTS.md"), InitTool.GetAgentsMarkdown(), utf8NoBom);
+        File.WriteAllText(Path.Combine(ctx.ProjectDir, "AGENTS.md"), AgentGuide.Markdown, utf8NoBom);
         filesUpdated.Add("AGENTS.md");
 
         // Overwrite JSON Schemas with latest version

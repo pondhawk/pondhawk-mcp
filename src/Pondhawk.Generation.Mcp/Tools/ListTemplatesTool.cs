@@ -8,7 +8,7 @@ namespace Pondhawk.Generation.Mcp.Tools;
 [McpServerToolType]
 public sealed class ListTemplatesTool
 {
-    [McpServerTool(Name = "list_templates"), Description("Lists available templates from the project configuration. See AGENTS.md for detailed usage instructions.")]
+    [McpServerTool(Name = "list_templates"), Description("Lists the templates the project configuration declares. Returns JSON: each template key with its path, output pattern, scope, mode, and the node Kind it applies to.")]
     public static string Execute(ServerContext ctx)
     {
         var (logger, sw) = ctx.StartToolCall("list_templates");

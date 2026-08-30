@@ -146,6 +146,21 @@ Validate the config, then generate
 | `validate_config` | Checks config, templates, and model without generating |
 | `update` | Refreshes AGENTS.md and JSON schemas after a server upgrade |
 
+## What the server tells an agent
+
+An agent does not have to be told how to drive pondhawk — the server documents itself over
+the protocol, so a bare MCP connection is enough to work from.
+
+| Channel | Contents |
+|---------|----------|
+| `instructions` in the initialize handshake | A short orientation: the three project files, dispatch, the validate/generate loop, and the two failure modes that are quiet |
+| Resource `pondhawk://agents.md` | The full guide — the input model, macros and dispatch, variants, configuration, overrides, and the working loop |
+| Tool descriptions | What each tool does and what it returns |
+
+The resource is served from the binary rather than read off disk, so it always matches the
+running server and is readable before `init` has created anything. `init` and `update` write
+the same text into the project as `AGENTS.md` for people and for file-based coding agents.
+
 ## Configuration
 
 All settings live in `pondhawk.project.json`:

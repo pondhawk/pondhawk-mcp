@@ -13,7 +13,7 @@ namespace Pondhawk.Generation.Mcp.Tools;
 [McpServerToolType]
 public sealed class GenerateTool
 {
-    [McpServerTool(Name = "generate"), Description("Generates files by rendering Liquid templates against the nodes in model.json and writes them to disk. See AGENTS.md for detailed usage instructions.")]
+    [McpServerTool(Name = "generate"), Description("Renders the configured Liquid templates against the nodes in model.json and writes the files to disk. Returns JSON: Success, per-file Created/Overwritten/Skipped/Failed counts, and the failures themselves. Generation is per-file, so check the counts rather than assuming a returned result means everything was written.")]
     public static string Execute(
         ServerContext ctx,
         [Description("Template keys to run (default: all)")]

@@ -9,7 +9,7 @@ namespace Pondhawk.Generation.Mcp.Tools;
 [McpServerToolType]
 public sealed class ValidateConfigTool
 {
-    [McpServerTool(Name = "validate_config"), Description("Validates pondhawk.project.json, the templates it references, and model.json. Reports errors and warnings without generating anything. See AGENTS.md for detailed usage instructions.")]
+    [McpServerTool(Name = "validate_config"), Description("Checks pondhawk.project.json, the templates it references, and model.json without writing anything. Returns JSON: Valid, plus errors and warnings. Catches unparseable templates, unknown filters, a model that violates its schema, overrides matching no node, and an override naming a variant macro no template declares. Run it after editing the model or templates.")]
     public static string Execute(ServerContext ctx)
     {
         var (logger, sw) = ctx.StartToolCall("validate_config");
