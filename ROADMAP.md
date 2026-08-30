@@ -100,6 +100,21 @@ tight one, and everything it needs already exists.
 
 ---
 
+## Decided along the way
+
+**Run-level transactions: no.** A transactional file manager was considered and rejected. It
+solves a problem this tool does not have and misses the one it does. Rolling a failed run back
+would mean deleting files that generated correctly, contradicting the deliberate per-file
+failure design — and generated code is not a database: generation is deterministic and
+idempotent, so recovery is "fix the error and run again", with `check` and the manifest saying
+what state the tree is in meanwhile.
+
+**Per-file atomicity: yes.** Writes go through a temporary file in the same directory and are
+renamed into place, so a crash leaves the old file or the new one and never a mixture. Rendering
+already completes to a string before any write begins, so this closed the last route by which a
+partial file could reach disk. The manifest already wrote this way; the generated files did not,
+which was backwards.
+
 ## Deliberately not decided
 
 Two adjacent features cut against the "knows nothing about any target" purity that makes the

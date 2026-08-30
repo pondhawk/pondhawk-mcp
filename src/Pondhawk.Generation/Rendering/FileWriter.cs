@@ -56,9 +56,50 @@ public static class FileWriter
         if (!string.IsNullOrEmpty(dir))
             Directory.CreateDirectory(dir);
 
-        File.WriteAllText(fullPath, content, Utf8NoBom);
+        WriteAtomically(fullPath, content);
 
         return new FileWriteResult { Path = fullPath, Action = ActionName(outcome) };
+    }
+
+    /// <summary>
+    /// Writes through a temporary file in the same directory and renames it into place.
+    /// </summary>
+    /// <remarks>
+    /// The rename is atomic, so a crash or a full disk leaves either the previous file or the
+    /// new one and never a truncated mixture of the two. Rendering already happens to a string
+    /// before any write begins, so this closes the only remaining way a partial file could
+    /// reach disk. The temporary must share the destination's directory: renaming across
+    /// filesystems is a copy, and a copy is not atomic.
+    ///
+    /// Deliberately per file rather than per run. A run that fails partway leaves the files it
+    /// wrote correctly in place, which is the existing design — rolling those back would mean
+    /// deleting correct output. Generation is deterministic and idempotent, so the recovery is
+    /// to fix the error and run again, and `check` says what state the tree is in meanwhile.
+    /// </remarks>
+    private static void WriteAtomically(string fullPath, string content)
+    {
+        var temp = $"{fullPath}.{Guid.NewGuid():N}.tmp";
+
+        try
+        {
+            File.WriteAllText(temp, content, Utf8NoBom);
+            File.Move(temp, fullPath, overwrite: true);
+        }
+        catch
+        {
+            // A failed write must not leave its scratch file behind in the output tree.
+            try
+            {
+                if (File.Exists(temp))
+                    File.Delete(temp);
+            }
+            catch
+            {
+                // Nothing useful to do; the original failure is what matters.
+            }
+
+            throw;
+        }
     }
 
     /// <summary>

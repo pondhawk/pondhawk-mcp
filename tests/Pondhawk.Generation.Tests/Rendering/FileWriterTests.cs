@@ -178,4 +178,28 @@ public class FileWriterTests : IDisposable
         FileWriter.ResolveContained(_tempDir, "sub/file.cs")
             .ShouldBe(Path.GetFullPath(Path.Combine(_tempDir, "sub", "file.cs")));
     }
+
+    [Fact]
+    public void WriteFile_LeavesNoScratchFilesBehind()
+    {
+        // The temporary has to share the destination's directory for the rename to be atomic,
+        // which puts it inside the output tree — so it must never survive the write.
+        FileWriter.WriteFile(_tempDir, "Sub/Product.cs", "content", "Always");
+
+        Directory.EnumerateFiles(_tempDir, "*.tmp", SearchOption.AllDirectories).ShouldBeEmpty();
+        File.ReadAllText(Path.Combine(_tempDir, "Sub", "Product.cs")).ShouldBe("content");
+    }
+
+    [Fact]
+    public void WriteFile_ReplacingAFile_NeverLeavesAMixtureOfTheTwo()
+    {
+        const string name = "Product.cs";
+        var path = Path.Combine(_tempDir, name);
+        FileWriter.WriteFile(_tempDir, name, new string('a', 40_000), "Always");
+
+        FileWriter.WriteFile(_tempDir, name, "short", "Always");
+
+        File.ReadAllText(path).ShouldBe("short");
+        Directory.EnumerateFiles(_tempDir, "*.tmp").ShouldBeEmpty();
+    }
 }

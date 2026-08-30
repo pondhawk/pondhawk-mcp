@@ -102,7 +102,7 @@ public static class ManifestStore
         EnsureLogsIgnored(projectDir);
 
         var json = JsonSerializer.Serialize(manifest, GenerationManifestContext.Default.GenerationManifest);
-        var temp = path + ".tmp";
+        var temp = $"{path}.{Guid.NewGuid():N}.tmp";
         File.WriteAllText(temp, json, Utf8NoBom);
         File.Move(temp, path, overwrite: true);
     }
