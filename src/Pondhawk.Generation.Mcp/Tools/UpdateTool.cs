@@ -26,7 +26,7 @@ public sealed class UpdateTool
         var filesUpdated = new List<string>();
 
         // Overwrite AGENTS.md with latest embedded content
-        File.WriteAllText(Path.Combine(ctx.ProjectDir, "AGENTS.md"), AgentGuide.Markdown, utf8NoBom);
+        File.WriteAllText(Path.Combine(ctx.ProjectDir, "AGENTS.md"), AgentGuide.ProjectRules(ctx.EnsureConfig()) + AgentGuide.Markdown, utf8NoBom);
         filesUpdated.Add("AGENTS.md");
 
         // Overwrite JSON Schemas with latest version

@@ -204,4 +204,40 @@ public class InitToolTests : IDisposable
         second.GetProperty("Skipped").GetInt32().ShouldBe(1);
     }
 
+
+    [Fact]
+    public void Init_WritesProjectRulesAtTheTopOfAgentsMarkdown()
+    {
+        // The handshake instructions are read once and then compete with everything after.
+        // This is the same rule stated in the repository, where the mistake gets made.
+        InitTool.Execute(new ServerContext(_tempDir), projectName: "Catalog", outputDir: "generated");
+
+        var agents = File.ReadAllText(Path_("AGENTS.md"));
+        var rules = agents[..agents.IndexOf("# pondhawk — Instructions", StringComparison.Ordinal)];
+
+        rules.ShouldContain("Catalog");
+        rules.ShouldContain("Do not hand-write files it generates");
+        rules.ShouldContain("`generated`", Case.Sensitive);
+        rules.ShouldContain("`reference`");
+        rules.ShouldContain("overwritten every run");
+        rules.ShouldContain("written once, then yours");
+    }
+
+    [Fact]
+    public void Init_ProjectRulesNameTheRealOutputDirectory()
+    {
+        // A rule that makes you look up where the generated files live is a rule that gets
+        // skipped.
+        InitTool.Execute(new ServerContext(_tempDir), outputDir: "build/artifacts");
+
+        File.ReadAllText(Path_("AGENTS.md")).ShouldContain("build/artifacts");
+    }
+
+    [Fact]
+    public void Init_AgentsMarkdownStillCarriesTheWholeGuide()
+    {
+        InitTool.Execute(new ServerContext(_tempDir));
+
+        File.ReadAllText(Path_("AGENTS.md")).ShouldEndWith(AgentGuide.Markdown);
+    }
 }

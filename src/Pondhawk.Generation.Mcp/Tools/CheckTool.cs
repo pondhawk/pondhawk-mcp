@@ -10,7 +10,7 @@ namespace Pondhawk.Generation.Mcp.Tools;
 [McpServerToolType]
 public sealed class CheckTool
 {
-    [McpServerTool(Name = "check"), Description("Reports whether the generated files on disk are what the current model and templates produce, without writing anything. Returns JSON: UpToDate, plus every stale file and why. Use it after pulling a branch or before relying on generated code; run generate with dryRun to see the actual diffs.")]
+    [McpServerTool(Name = "check"), Description("Reports whether the generated files on disk are what the current model and templates produce, without writing anything. Returns JSON: Clean (gate CI on this), UpToDate, stale files and why, orphans, and untracked files sitting in the output directory that pondhawk neither produces nor wrote — usually a file someone hand-wrote where a generated one belongs. Use it after pulling a branch or before relying on generated code; run generate with dryRun to see the actual diffs.")]
     public static string Execute(
         ServerContext ctx,
         [Description("Template keys to check (default: all)")]
@@ -62,19 +62,25 @@ public sealed class CheckTool
             ? []
             : Orphans(plan, manifest);
 
+        var untracked = templates is { Length: > 0 }
+            ? []
+            : Untracked(plan, manifest);
+
         var failures = plan.Failures
             .Select(f => new { f.Reference, f.Error })
             .ToList();
 
         var upToDate = stale.Count == 0 && failures.Count == 0 && orphans.Count == 0;
+        var clean = upToDate && untracked.Count == 0;
 
-        var summary = upToDate
-            ? $"Up to date — {checkedCount} generated files match the model"
+        var summary = clean
+            ? $"Clean — {checkedCount} generated files match the model"
             : string.Join(", ", new[]
             {
                 failures.Count > 0 ? $"{failures.Count} files FAILED to render" : null,
                 stale.Count > 0 ? $"{stale.Count} of {checkedCount} files are stale" : null,
-                orphans.Count > 0 ? $"{orphans.Count} orphaned files no longer produced (run prune)" : null
+                orphans.Count > 0 ? $"{orphans.Count} orphaned files no longer produced (run prune)" : null,
+                untracked.Count > 0 ? $"{untracked.Count} untracked files in the output directory that pondhawk did not write" : null
             }.Where(p => p is not null));
 
         sw.Stop();
@@ -84,10 +90,14 @@ public sealed class CheckTool
 
         return JsonSerializer.Serialize(new
         {
+            // Clean is the one field to gate CI on. UpToDate answers only "does the tree match
+            // the model"; a hand-written file where a generated one belongs leaves it true.
+            Clean = clean,
             UpToDate = upToDate,
             Checked = checkedCount,
             Stale = stale,
             Orphans = orphans,
+            Untracked = untracked,
             Failed = failures,
             OutputDir = plan.OutputDir,
             Summary = summary
@@ -129,6 +139,41 @@ public sealed class CheckTool
                 file.TemplateKey,
                 Detail = "The file has changed since pondhawk wrote it. Regenerating will discard those edits — move them into the template or a SkipExisting file first."
             };
+    }
+
+    /// <summary>
+    /// Files sitting in the output directory that pondhawk neither produces nor has any record
+    /// of writing.
+    /// </summary>
+    /// <remarks>
+    /// Everything else this tool checks starts from the plan or the manifest, so a file written
+    /// by hand at a path pondhawk does not produce was invisible to both — which is exactly the
+    /// shape of someone bypassing the generator and writing the file themselves. This is the
+    /// only check that starts from what is actually on disk.
+    ///
+    /// It does not make UpToDate false: staleness and trespass are different questions. It does
+    /// make Clean false, which is what a CI gate should look at.
+    /// </remarks>
+    private static List<object> Untracked(GenerationPlan plan, GenerationManifest manifest)
+    {
+        if (!Directory.Exists(plan.OutputDir))
+            return [];
+
+        var known = plan.Files.Select(f => f.RelativePath).ToHashSet(StringComparer.Ordinal);
+        known.UnionWith(manifest.Files.Keys);
+
+        return Directory
+            .EnumerateFiles(plan.OutputDir, "*", SearchOption.AllDirectories)
+            .Select(f => Path.GetRelativePath(plan.OutputDir, f))
+            .Where(relative => !known.Contains(relative))
+            .Where(relative => !relative.EndsWith(".tmp", StringComparison.Ordinal))
+            .Order(StringComparer.Ordinal)
+            .Select(relative => (object)new
+            {
+                RelativePath = relative,
+                Detail = "pondhawk did not write this and does not produce it. If it belongs to a generated class, add it to the model instead of keeping it by hand."
+            })
+            .ToList();
     }
 
     /// <summary>

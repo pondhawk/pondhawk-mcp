@@ -393,4 +393,84 @@ public class ManifestAndPruneTests : IDisposable
         Json(CheckTool.Execute(new ServerContext(_tempDir)))
             .GetProperty("UpToDate").GetBoolean().ShouldBeTrue();
     }
+
+    // --- check: files pondhawk did not put there ------------------------------
+
+    [Fact]
+    public void Check_ReportsAHandWrittenFileInTheOutputDirectory()
+    {
+        // The bypass this catches: an agent decides it is simpler to write the file itself.
+        // Every other check starts from the plan or the manifest, so such a file was invisible.
+        GenerateTool.Execute(Configure());
+        File.WriteAllText(Path.Combine(_outputDir, "Supplier.cs"), "// written by hand");
+
+        var result = Json(CheckTool.Execute(new ServerContext(_tempDir)));
+
+        var untracked = result.GetProperty("Untracked").EnumerateArray().ShouldHaveSingleItem();
+        untracked.GetProperty("RelativePath").GetString().ShouldBe("Supplier.cs");
+        result.GetProperty("Summary").GetString()!.ShouldContain("untracked");
+    }
+
+    [Fact]
+    public void Check_UntrackedFilesFailCleanButNotUpToDate()
+    {
+        // Staleness and trespass are different questions. Clean is the one to gate CI on.
+        GenerateTool.Execute(Configure());
+        File.WriteAllText(Path.Combine(_outputDir, "Supplier.cs"), "// written by hand");
+
+        var result = Json(CheckTool.Execute(new ServerContext(_tempDir)));
+
+        result.GetProperty("UpToDate").GetBoolean().ShouldBeTrue();
+        result.GetProperty("Clean").GetBoolean().ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Check_FindsAHandWrittenFileNestedInTheOutputTree()
+    {
+        GenerateTool.Execute(Configure());
+        Directory.CreateDirectory(Path.Combine(_outputDir, "Sub"));
+        File.WriteAllText(Path.Combine(_outputDir, "Sub", "Sneaky.cs"), "// hidden away");
+
+        Json(CheckTool.Execute(new ServerContext(_tempDir)))
+            .GetProperty("Untracked").EnumerateArray().ShouldHaveSingleItem()
+            .GetProperty("RelativePath").GetString().ShouldBe(Path.Combine("Sub", "Sneaky.cs"));
+    }
+
+    [Fact]
+    public void Check_DoesNotCallGeneratedOrOrphanedFilesUntracked()
+    {
+        // A file pondhawk wrote is accounted for either way — as current, or as an orphan.
+        // Reporting it twice under different names would be noise.
+        GenerateTool.Execute(Configure());
+        WriteModel("Product");
+
+        var result = Json(CheckTool.Execute(new ServerContext(_tempDir)));
+
+        result.GetProperty("Orphans").GetArrayLength().ShouldBe(1);
+        result.GetProperty("Untracked").GetArrayLength().ShouldBe(0);
+    }
+
+    [Fact]
+    public void Check_ACleanTreeIsClean()
+    {
+        GenerateTool.Execute(Configure());
+
+        var result = Json(CheckTool.Execute(new ServerContext(_tempDir)));
+
+        result.GetProperty("Clean").GetBoolean().ShouldBeTrue();
+        result.GetProperty("Untracked").GetArrayLength().ShouldBe(0);
+        result.GetProperty("Summary").GetString()!.ShouldContain("Clean");
+    }
+
+    [Fact]
+    public void Check_SkipsUntrackedDetectionWhenFiltered()
+    {
+        // A filtered check does not know what the other templates produce, so anything it has
+        // not planned would look untracked.
+        GenerateTool.Execute(Configure());
+        File.WriteAllText(Path.Combine(_outputDir, "Supplier.cs"), "// written by hand");
+
+        Json(CheckTool.Execute(new ServerContext(_tempDir), templates: ["entity"]))
+            .GetProperty("Untracked").GetArrayLength().ShouldBe(0);
+    }
 }

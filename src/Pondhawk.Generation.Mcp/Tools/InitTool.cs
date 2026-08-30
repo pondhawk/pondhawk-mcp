@@ -74,7 +74,7 @@ public sealed class InitTool
         File.WriteAllText(Path.Combine(templatesDir, "reference.liquid"), GetGeneratedTemplate(), utf8NoBom);
         File.WriteAllText(Path.Combine(templatesDir, "notes.liquid"), GetStubTemplate(), utf8NoBom);
 
-        File.WriteAllText(Path.Combine(ctx.ProjectDir, "AGENTS.md"), AgentGuide.Markdown, utf8NoBom);
+        File.WriteAllText(Path.Combine(ctx.ProjectDir, "AGENTS.md"), AgentGuide.ProjectRules(config) + AgentGuide.Markdown, utf8NoBom);
 
         // .pondhawk holds the manifest, which is committed, next to the logs, which are not.
         ManifestStore.EnsureLogsIgnored(ctx.ProjectDir);

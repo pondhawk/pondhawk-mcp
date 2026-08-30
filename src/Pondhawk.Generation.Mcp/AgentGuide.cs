@@ -1,3 +1,5 @@
+using Pondhawk.Generation.Configuration;
+
 namespace Pondhawk.Generation.Mcp;
 
 /// <summary>
@@ -20,10 +22,30 @@ public static class AgentGuide
     /// </summary>
     public static string ServerInstructions => $$"""
         pondhawk renders Liquid templates against a structured input model and writes the
-        result to disk. Use it for sets of artifacts that must all follow the same pattern --
-        entities, DTOs, clients, handlers -- where consistency across the set matters more
-        than any single file. It knows nothing about databases, or C#, or any particular
-        target: what comes out is decided entirely by the model and the templates.
+        result to disk. It knows nothing about databases, or C#, or any particular target:
+        what comes out is decided entirely by the model and the templates.
+
+        WHY TO USE IT, AND WHEN NOT TO SKIP IT
+
+        It is for work that is undifferentiated across many instances -- a fleet of entities,
+        DTOs, clients, handlers, resources -- where there is one correct shape and no room for
+        creativity in any individual file. On that work it beats writing the files yourself on
+        every axis at once. Forty artifacts by hand is forty times the tokens and the wall
+        clock; through a template it is one render. And the hand-written forty will not be
+        identical -- they will be forty subtly different takes on one pattern, which is the
+        actual defect, because being identical in shape was the whole point.
+
+        The comparison to make is therefore not "generate this file, or write this file".
+        Writing one file directly is genuinely cheaper, and that reasoning is a trap: the
+        choice is between one template and N hand-written files that drift. Once a project
+        generates a class of artifact, adding another member costs one entry in model.json --
+        far less than writing the file -- and every member stays in step for free.
+
+        So: before writing a file, check whether it belongs to a class this project already
+        generates. `list_templates` gives the output patterns, `describe_model` gives the
+        Kinds. If it does, add it to the model and run `generate`. Never hand-write a file
+        this project generates, and never edit one after it is generated -- `generate` will
+        overwrite it, and the work is lost. Change the model or the template instead.
 
         A project is three files you maintain and pondhawk only reads:
 
@@ -31,10 +53,8 @@ public static class AgentGuide
           templates/*.liquid     how to generate it -- one `Default<Kind>` macro per Kind
           pondhawk.project.json  which templates run, where output goes, and overrides
 
-        A template reads model.json unless its `Model` field names another file, so a project
-        with unrelated concerns -- entities edited by hand, an API surface regenerated from a
-        spec -- keeps them in separate models instead of one crowded document. Each model has
-        its own root, and `list_templates` reports which one every template reads.
+        A template reads model.json unless its `Model` field names another file, so unrelated
+        concerns stay in separate models. `list_templates` reports which one each template reads.
 
         `{% dispatch node %}` in a template calls the macro matching that node's Kind, which
         is what keeps a generated set uniform. An override can point a single node at a
@@ -55,10 +75,12 @@ public static class AgentGuide
         separate question -- are the files on disk already what the model produces -- and is
         what to run after pulling a branch.
 
-        `generate` records what it wrote in `.pondhawk/manifest.json`, which is meant to be
-        committed. That record is what lets `check` distinguish "the model changed" from
-        "somebody edited a generated file", and what lets `prune` delete files the model no
-        longer produces without touching anything it did not write.
+        `generate` records what it wrote in `.pondhawk/manifest.json`, which is committed. That
+        record lets `check` tell "the model changed" from "somebody edited a generated file",
+        and lets `prune` delete files the model no longer produces without touching anything it
+        did not write. `check` also reports files sitting in the output directory that pondhawk
+        neither produces nor wrote -- usually a file someone hand-wrote where a generated one
+        belongs. Its `Clean` field is the one to gate CI on.
 
         Two failure modes are quiet and worth guarding against explicitly:
 
@@ -73,9 +95,60 @@ public static class AgentGuide
         templates, unknown filters, a model that violates its schema, overrides that match no
         node, and an override naming a variant macro no template declares.
 
-        Full documentation: read the MCP resource {{ResourceUri}}. An initialized project also
-        has the same text on disk as AGENTS.md.
+        Full documentation: read the MCP resource {{ResourceUri}}. An initialized project has
+        the same text on disk as AGENTS.md, beneath a preamble naming that project's own
+        generated artifacts and where they live. Read that preamble before writing any file.
         """;
+
+    /// <summary>
+    /// A project-specific preamble written to the top of AGENTS.md.
+    /// </summary>
+    /// <remarks>
+    /// The handshake instructions are read once, at connect time, and then compete with
+    /// everything that happens afterwards. This is the same rule stated where the mistake
+    /// actually gets made: in the repository, in the file coding agents read before touching
+    /// anything. It names the real output directory and the real template list, because a rule
+    /// that requires looking up where the generated files live is a rule that gets skipped.
+    /// </remarks>
+    public static string ProjectRules(ProjectConfiguration config)
+    {
+        var outputDir = string.IsNullOrWhiteSpace(config.OutputDir) ? "the output directory" : config.OutputDir;
+
+        var artifacts = config.Templates.Count == 0
+            ? "None configured yet."
+            : string.Join("\n", config.Templates
+                .OrderBy(t => t.Key, StringComparer.Ordinal)
+                .Select(t => $"| `{t.Key}` | `{t.Value.OutputPattern}` | {(t.Value.Mode.Equals("SkipExisting", StringComparison.OrdinalIgnoreCase) ? "written once, then yours" : "overwritten every run")} |"));
+
+        return $"""
+            # {config.ProjectName ?? "This project"} — rules for agents
+
+            **This project generates code with pondhawk. Do not hand-write files it generates,
+            and do not edit files it has generated.**
+
+            Everything under `{outputDir}` is produced from `model.json` and the templates. A
+            `generate` run overwrites it, so an edit made there is work waiting to be destroyed.
+            To change generated output, change the model or the template and run `generate`.
+
+            | Artifact | Produces | On each run |
+            |----------|----------|-------------|
+            {artifacts}
+
+            Before writing a file anywhere, check whether it belongs to a class listed above. If
+            it does, add a node to `model.json` and run `generate` instead — that is one line of
+            model against a whole file written by hand, and it keeps the set consistent.
+
+            Adding one more of something this project already generates is nearly free. Writing
+            it by hand costs the file, and costs the uniformity that made generating it
+            worthwhile.
+
+            Run `check` to see whether the tree is current, and what is in `{outputDir}` that
+            pondhawk did not put there.
+
+            ---
+
+            """;
+    }
 
     /// <summary>
     /// The full agent guide. Written to disk as AGENTS.md by init and update, and served

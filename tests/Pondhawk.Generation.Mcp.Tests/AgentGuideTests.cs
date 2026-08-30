@@ -73,10 +73,36 @@ public class AgentGuideTests
     [Fact]
     public void ServerInstructions_StayShortEnoughToCarryInEveryClientContext()
     {
-        // Sent on every connection and held for the whole session. The full guide is the
-        // resource; this is the orientation. Kept well under the guide's own length.
-        AgentGuide.ServerInstructions.Length.ShouldBeLessThan(AgentGuide.Markdown.Length);
-        AgentGuide.ServerInstructions.Length.ShouldBeLessThan(4000);
+        // Sent on every connection and held for the whole session, so it has a budget. The
+        // budget is not the smallest possible number though: the section explaining why to use
+        // the tool at all is what stops an agent quietly hand-writing files the project
+        // generates, which is the expensive failure this server exists to prevent. That earns
+        // its space. The full guide is still an order of magnitude longer.
+        AgentGuide.ServerInstructions.Length.ShouldBeLessThan(AgentGuide.Markdown.Length / 3);
+        AgentGuide.ServerInstructions.Length.ShouldBeLessThan(6000);
+    }
+
+    [Fact]
+    public void ServerInstructions_ArgueForUsingTheToolAtAll()
+    {
+        // "I forgot" and "it was simpler to do it myself" are the two ways this server goes
+        // unused. The second is a reasoning error the instructions have to answer directly:
+        // for one file, writing it by hand really is cheaper.
+        var instructions = AgentGuide.ServerInstructions;
+
+        instructions.ShouldContain("undifferentiated");
+        instructions.ShouldContain("one template and N hand-written files");
+        instructions.ShouldContain("list_templates");
+        instructions.ShouldContain("describe_model");
+    }
+
+    [Fact]
+    public void ServerInstructions_ForbidHandWritingAndEditingGeneratedFiles()
+    {
+        var instructions = AgentGuide.ServerInstructions;
+
+        instructions.ShouldContain("Never hand-write a file");
+        instructions.ShouldContain("never edit one after it is generated");
     }
 
     [Fact]

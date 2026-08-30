@@ -164,7 +164,7 @@ Validate the config, then generate
 |------|-------------|
 | `init` | Scaffolds a new project: config, a starter model, two Markdown example templates demonstrating the mechanics, schemas, and AGENTS.md |
 | `generate` | Renders templates against the model and writes files; `dryRun: true` reports what would change instead, with unified diffs, and writes nothing |
-| `check` | Reports whether the files on disk are what the model and templates currently produce, and lists orphans |
+| `check` | Reports whether the files on disk are what the model and templates currently produce, plus orphans and untracked files. `Clean` is the field to gate CI on |
 | `prune` | Removes generated files the model no longer produces; reports unless passed `apply` |
 | `list_templates` | Lists configured templates with their settings |
 | `describe_model` | Summarises a model's Kinds, structure, metadata keys and inconsistencies without listing its nodes |
@@ -201,6 +201,33 @@ They answer different questions. `preview` is "what does this one artifact look 
 and is the loop to sit in while writing a macro. A dry run is "what does this change do across
 the project", and is what to read before accepting an edit to something shared — a partial,
 especially.
+
+## Why generate at all
+
+pondhawk earns its place on work that is undifferentiated across many instances — a fleet of
+entities, DTOs, clients, handlers — where there is one correct shape and no room for creativity
+in any individual file. On that work it wins on every axis at once: forty artifacts by hand is
+forty times the tokens and the wall clock, and the forty will not come out identical. They will
+be forty subtly different takes on one pattern, which is the actual defect, because being
+identical in shape was the point.
+
+The comparison that matters is not "generate this file or write this file" — writing one file
+directly really is cheaper, and that reasoning is the trap. The choice is between one template
+and N hand-written files that drift. Once a project generates a class of artifact, adding
+another member costs one entry in `model.json`, which is less than writing the file, and every
+member stays in step for free.
+
+Three things keep that from eroding:
+
+- **The handshake instructions** say it to every client before it does anything, including the
+  rule: check whether a file belongs to a generated class before writing it, and never edit a
+  generated file.
+- **`AGENTS.md`** carries a project-specific preamble naming that project's artifacts and output
+  directory, so the rule is present in the repository where the mistake actually happens.
+- **`check`** makes bypassing it visible. Its `Clean` field covers stale files, orphans, and
+  untracked files sitting in the output directory that pondhawk neither produces nor wrote —
+  which is the shape of someone hand-writing a file where a generated one belongs. Gate CI on
+  `Clean`; documentation persuades, a failing build is what holds.
 
 ## The manifest
 
