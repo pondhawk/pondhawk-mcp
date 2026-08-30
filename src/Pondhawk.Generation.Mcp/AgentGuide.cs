@@ -45,7 +45,9 @@ public static class AgentGuide
         generates. `list_templates` gives the output patterns, `describe_model` gives the
         Kinds. If it does, add it to the model and run `generate`. Never hand-write a file
         this project generates, and never edit one after it is generated -- `generate` will
-        overwrite it, and the work is lost. Change the model or the template instead.
+        overwrite it, and the work is lost. Change the model or the template instead. That
+        includes running a formatter over generated files: it changes the bytes, which reads as
+        an edit, and the next run reverts it. Make the template emit conforming output.
 
         A project is three files you maintain and pondhawk only reads:
 
@@ -501,6 +503,20 @@ public static class AgentGuide
         `prune` deletes only files it can prove it owns: recorded in the manifest, still byte
         for byte as pondhawk wrote them, and not `SkipExisting`. Anything else it reports and
         leaves alone. It reports without deleting unless you pass `apply: true`.
+
+        ### If the project runs a formatter
+
+        Do not let it touch generated files, and do not run one over them yourself. A formatter
+        changes the bytes, which is indistinguishable from a hand edit: `check` reports
+        `EditedSinceGenerated`, the next `generate` reverts the formatting, the formatter
+        reapplies it, and the two tools fight over the file indefinitely.
+
+        Make the **template** emit output the formatter would accept instead. That is a
+        one-time cost per template rather than a permanent conflict, and `preview` makes
+        iterating on it cheap — render one node, read the text, adjust the whitespace, repeat,
+        with nothing written to disk.
+
+        pondhawk deliberately runs no external commands, so it will not format for you.
 
         ## Checking a project you did not generate
 

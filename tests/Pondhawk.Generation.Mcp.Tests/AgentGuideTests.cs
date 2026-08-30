@@ -106,6 +106,20 @@ public class AgentGuideTests
     }
 
     [Fact]
+    public void Guide_WarnsThatFormattingAGeneratedFileReadsAsEditingIt()
+    {
+        // The two tools would otherwise fight over the file forever, and check would
+        // misdiagnose the formatter's work as somebody's edit.
+        var guide = AgentGuide.Markdown;
+
+        guide.ShouldContain("indistinguishable from a hand edit");
+        guide.ShouldContain("EditedSinceGenerated");
+        guide.ShouldContain("pondhawk deliberately runs no external commands");
+
+        AgentGuide.ServerInstructions.ShouldContain("running a formatter over generated files");
+    }
+
+    [Fact]
     public void ServerInstructions_StandAloneWithoutTheFullGuide()
     {
         // A client that reads no resource and opens no file still has to be able to work.

@@ -115,16 +115,47 @@ already completes to a string before any write begins, so this closed the last r
 partial file could reach disk. The manifest already wrote this way; the generated files did not,
 which was backwards.
 
-## Deliberately not decided
+## Adjacent features, both declined
 
-Two adjacent features cut against the "knows nothing about any target" purity that makes the
-tool general. Both are adoption features rather than capability features, and whether they
-belong is a product call:
+Two features looked like natural extensions and cut against the "knows nothing about any
+target" premise. Both are now decided:
 
-- **Formatting hooks** — a per-template `gofmt` / `prettier` / `dotnet format` pass over the
-  output. Generated code that does not match project convention is permanent diff noise. But
-  it means shelling out arbitrary commands, which is a real security surface for an MCP
-  server.
+- ~~**Formatting hooks**~~ — **decided: no**, and the trap they would have solved is documented
+  instead.
+
+  The problem is real, and sharper than diff noise. A formatter changes the bytes of a
+  generated file, which is indistinguishable from a hand edit: `check` reports
+  `EditedSinceGenerated`, the next `generate` reverts the formatting, the formatter reapplies
+  it, and two tools own the file forever. The guide and README now say to keep formatters away
+  from generated output and make the template emit conforming text, which `preview` makes cheap
+  to iterate on.
+
+  Four costs, and the first two are why:
+
+  **It would be the first execution surface.** The tool runs no external commands at all today
+  — Liquid rendering and file IO, no shell, no network. A command read from
+  `pondhawk.project.json` is remote code execution triggered by pointing the server at a cloned
+  repo, which is a routine thing to do with an MCP server. That is a categorical change to the
+  threat model, not an incremental risk.
+
+  **It would weaken determinism, which items 1 and 2 rest on.** Byte-stable output is what makes
+  the manifest hash, `check` and dry-run diffs mean anything. A formatter is an unpinned
+  external binary, so two developers on different `gofmt` or prettier versions get different
+  hashes for the same model and templates, and `check` reports drift that is not there.
+  "Deterministic given the model and templates" would become "and the local toolchain".
+
+  **Only one shape works, and it excludes a major formatter.** It would have to pipe the
+  rendered string through the formatter before writing: formatting after the write breaks
+  atomic replace, breaks the manifest hash, and leaves the dry run unable to show what would
+  land. But stdin/stdout rules out `dotnet format`, which operates on projects.
+
+  **Failure semantics have no good answer.** A missing formatter either fails every run or is
+  silently skipped; neither is right.
+
+  **If it is ever revisited**, the command belongs on the server launch line beside `--project`,
+  never in the repo config. That moves the trust boundary to the user's own MCP client
+  configuration, where `--project` already comes from, and a cloned repo cannot inject it.
+
 - ~~**Starter template packs**~~ — **decided: no**, and `init` was corrected to match.
 
   An LLM writes Liquid for today's target, informed by this project's own conventions, which

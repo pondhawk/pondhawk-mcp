@@ -253,6 +253,19 @@ The hash separates two things a content comparison cannot:
 `prune` deletes only what it can prove it owns: recorded in the manifest, byte for byte as
 pondhawk wrote it, and not `SkipExisting`. Everything else it reports and leaves alone.
 
+### If the project runs a formatter
+
+Keep it away from generated files. A formatter changes the bytes, which is indistinguishable
+from a hand edit — `check` reports `EditedSinceGenerated`, the next `generate` reverts the
+formatting, the formatter reapplies it, and the two tools fight over the file indefinitely.
+
+Make the template emit output the formatter would accept instead: a one-time cost per template
+rather than a permanent conflict. `preview` renders one node and returns the text without
+writing, which is the loop for getting whitespace right.
+
+pondhawk runs no external commands, by design — see the roadmap for why formatting hooks were
+declined.
+
 ## Configuration
 
 All settings live in `pondhawk.project.json`:
