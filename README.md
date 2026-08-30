@@ -229,7 +229,18 @@ Pair an `Always` template with a `SkipExisting` one to separate generated code f
 | `Product.generated.cs` | Generated from the model | Always |
 | `Product.cs` | Developer's own code | Only created if missing |
 
-In C# these are `partial class` halves; other languages have their own equivalents.
+What the two halves *are* depends on how much the target language lets generated and
+hand-written code contribute to one type:
+
+| | Mechanism | Languages |
+|---|---|---|
+| The type itself splits | `partial class` — neither half is privileged | C#, VB.NET |
+| The type is declared once, behavior attaches from elsewhere | Methods elsewhere in the same package, extra `impl` blocks, extensions, categories, open classes, traits | Go, Rust, Swift, Objective-C, Kotlin, Scala, Ruby, Python, PHP, Dart |
+| Neither — inherit instead | Generated base class, hand-written subclass | Java, and the fallback anywhere else |
+
+Most of the middle row adds behavior but not state — Swift extensions declare no stored
+properties, and Go and Rust accept fields only at the type's own declaration — so the generated
+half owns the data and the hand-written half adds methods.
 
 ## Template Context
 

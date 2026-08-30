@@ -227,8 +227,28 @@ public static class AgentGuide
 
         Pair an `Always` template with a `SkipExisting` one to separate generated code from
         hand-written code. The generated file is overwritten freely; the stub is created once and
-        is then the developer's. In C# these are `partial class` halves; other languages have
-        their own equivalents.
+        is then the developer's.
+
+        What the two halves *are* depends on how much the target language lets generated and
+        hand-written code contribute to one type:
+
+        | | Mechanism | Languages |
+        |---|---|---|
+        | The type itself splits | `partial class` — neither half is privileged | C#, VB.NET |
+        | The type is declared once, behavior attaches from elsewhere | Methods elsewhere in the same package, extra `impl` blocks, extensions, categories, open classes, traits | Go, Rust, Swift, Objective-C, Kotlin, Scala, Ruby, Python, PHP, Dart |
+        | Neither — inherit instead | Generated base class, hand-written subclass | Java, and the fallback anywhere else |
+
+        Most of the middle row adds behavior but not state: Swift extensions declare no stored
+        properties, and Go and Rust accept fields only at the type's own declaration. So let the
+        generated half own the data and the hand-written half add methods — which is the division
+        you want regardless.
+
+        Two things worth knowing when you meet them. Dart's `part` / `part of` is the closest
+        analogue to the C# workflow outside .NET and is what `json_serializable` and `freezed`
+        build on, but it splits a *library* rather than a class, so the generated file supplies
+        mixins or extensions. And TypeScript's `Partial<T>` is unrelated — a mapped type that
+        makes properties optional; TypeScript's actual analogue is declaration merging, which
+        merges interfaces but not classes.
 
         ## Overrides
 
