@@ -48,8 +48,9 @@ public static class AgentGuide
         model: it reports the Kind vocabulary, the metadata keys each Kind carries and how many
         nodes carry them, and flags inconsistencies, without your having to read the whole file.
 
-        The loop is: edit the model or templates, run `validate_config`, then `generate` with
-        `dryRun: true` to read the diffs, then `generate` for real. All are cheap and results
+        The loop is: edit the model or templates, iterate with `preview` (renders one node
+        through one template and returns the text, writing nothing), run `validate_config`, then
+        `generate` with `dryRun: true` to read the diffs, then `generate` for real. All are cheap and results
         are cached between calls, so run them freely while iterating. `check` answers a
         separate question -- are the files on disk already what the model produces -- and is
         what to run after pulling a branch.
@@ -321,6 +322,7 @@ public static class AgentGuide
         | `prune` | Removes generated files the model no longer produces. Reports unless told to apply |
         | `list_templates` | Lists configured templates |
         | `describe_model` | Summarises a model's Kinds, metadata keys and inconsistencies |
+        | `preview` | Renders one template for one node and returns the text, writing nothing |
         | `validate_config` | Checks config, templates and model without generating |
         | `update` | Refreshes AGENTS.md and JSON schemas after upgrading pondhawk |
 
@@ -367,7 +369,11 @@ public static class AgentGuide
            model that may be hundreds of nodes long. Read its `Notices` first; they are where a
            second convention already creeping in shows up.
         2. Edit `model.json` — adding, changing, or removing nodes.
-        3. Author or adjust templates, one `Default<Kind>` macro per Kind.
+        3. Author or adjust templates, one `Default<Kind>` macro per Kind. Iterate with
+           `preview`, which renders a single node through a single template and hands back the
+           text — overrides and variants applied, nothing written. A render error comes back as
+           `Error` rather than failing the call, because a half-finished macro is the normal
+           state while writing one.
         4. Run `validate_config`. It reports unparseable templates, unknown filters, a model that
            violates its schema, overrides matching no node, templates whose `AppliesTo` matches no
            Kind in the model, and — the one that matters most — an override naming a variant macro
@@ -382,6 +388,11 @@ public static class AgentGuide
 
         Steps 4 to 6 are cheap and the model is cached between calls, so run them as often as
         you like while iterating.
+
+        `preview` and `generate --dryRun` answer different questions. `preview` is "what does
+        this one artifact look like right now", and is the loop to sit in while writing a macro.
+        A dry run is "what does this change do to the whole project", and is what to read before
+        accepting an edit to something shared.
 
         ## The manifest
 

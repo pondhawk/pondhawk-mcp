@@ -166,6 +166,7 @@ Validate the config, then generate
 | `prune` | Removes generated files the model no longer produces; reports unless passed `apply` |
 | `list_templates` | Lists configured templates with their settings |
 | `describe_model` | Summarises a model's Kinds, structure, metadata keys and inconsistencies without listing its nodes |
+| `preview` | Renders one template for one node and returns the text, writing nothing |
 | `validate_config` | Checks config, templates, and model without generating |
 | `update` | Refreshes AGENTS.md and JSON schemas after a server upgrade |
 
@@ -183,6 +184,21 @@ the protocol, so a bare MCP connection is enough to work from.
 The resource is served from the binary rather than read off disk, so it always matches the
 running server and is readable before `init` has created anything. `init` and `update` write
 the same text into the project as `AGENTS.md` for people and for file-based coding agents.
+
+## Two ways to look before you write
+
+`preview` renders a single node through a single template and returns the text. Overrides and
+variants apply exactly as in a real run — it plans through the same code, and a test pins its
+output against what `generate` subsequently writes. A render error comes back as `Error` rather
+than failing the call, because a half-finished macro is the normal state while authoring one.
+
+`generate` with `dryRun: true` renders everything and returns unified diffs against what is on
+disk.
+
+They answer different questions. `preview` is "what does this one artifact look like right now",
+and is the loop to sit in while writing a macro. A dry run is "what does this change do across
+the project", and is what to read before accepting an edit to something shared — a partial,
+especially.
 
 ## The manifest
 
