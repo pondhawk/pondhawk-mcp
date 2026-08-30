@@ -24,7 +24,7 @@ public enum WriteOutcome
 public sealed class FileWriteResult
 {
     public string Path { get; set; } = "";
-    public string Action { get; set; } = ""; // "Created", "Overwritten", "SkippedExisting", "SkippedEmpty"
+    public string Action { get; set; } = ""; // "Created", "Overwritten", "Unchanged", "SkippedExisting", "SkippedEmpty"
 }
 
 public static class FileWriter
@@ -44,7 +44,10 @@ public static class FileWriter
     /// </summary>
     public static FileWriteResult WriteResolved(string fullPath, string content, string mode)
     {
-        var outcome = Decide(fullPath, content, mode, compareContent: false);
+        // Comparing costs a read, and buys not touching a file whose content is already
+        // correct. Rewriting it identically would move its timestamp, which is enough to
+        // wake every file watcher and incremental build downstream for no reason.
+        var outcome = Decide(fullPath, content, mode, compareContent: true);
 
         if (outcome is not (WriteOutcome.Create or WriteOutcome.Overwrite))
             return new FileWriteResult { Path = fullPath, Action = ActionName(outcome) };
@@ -91,6 +94,7 @@ public static class FileWriter
         WriteOutcome.Empty => "SkippedEmpty",
         WriteOutcome.SkippedExisting => "SkippedExisting",
         WriteOutcome.Create => "Created",
+        WriteOutcome.Unchanged => "Unchanged",
         _ => "Overwritten"
     };
 

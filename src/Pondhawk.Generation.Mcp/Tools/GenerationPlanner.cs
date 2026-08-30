@@ -15,6 +15,9 @@ public sealed class PlannedFile
     /// <summary>The node this file came from, or the template key for a Single-scope render.</summary>
     public required string Reference { get; init; }
 
+    /// <summary>The model file the node came from.</summary>
+    public required string ModelFile { get; init; }
+
     public required string FullPath { get; init; }
     public required string RelativePath { get; init; }
     public required string Content { get; init; }
@@ -30,7 +33,15 @@ public sealed class PlanFailure
 
 public sealed class GenerationPlan
 {
+    /// <summary>Absolute, for reading and writing files.</summary>
     public required string OutputDir { get; init; }
+
+    /// <summary>
+    /// As written in the config. The manifest is committed, so it must record this rather than
+    /// the resolved path — an absolute path would be one developer's machine and would make the
+    /// file wrong on every other clone.
+    /// </summary>
+    public required string ConfiguredOutputDir { get; init; }
     public List<PlannedFile> Files { get; } = [];
     public List<PlanFailure> Failures { get; } = [];
 
@@ -68,7 +79,7 @@ public static class GenerationPlanner
             ? config.OutputDir
             : Path.Combine(ctx.ProjectDir, config.OutputDir);
 
-        var plan = new GenerationPlan { OutputDir = outputDir };
+        var plan = new GenerationPlan { OutputDir = outputDir, ConfiguredOutputDir = config.OutputDir };
 
         // Templates may read different models, so each one is loaded on demand and cached for
         // the run. A missing model is a project-setup error like an uncompilable template, not a
@@ -136,7 +147,7 @@ public static class GenerationPlanner
                 var content = ctx.TemplateEngine.Render(compiled, context);
                 var fileName = GenerateTool.ResolveOutputPattern(ctx, templateConfig.OutputPattern, resolved[0]);
 
-                plan.Files.Add(Planned(plan, templateKey, node.Name, fileName, content, templateConfig.Mode));
+                plan.Files.Add(Planned(plan, templateKey, node.Name, fileName, content, templateConfig));
             }
             catch (Exception ex)
             {
@@ -167,7 +178,7 @@ public static class GenerationPlanner
             var content = ctx.TemplateEngine.Render(compiled, context);
             var fileName = GenerateTool.ResolveOutputPattern(ctx, templateConfig.OutputPattern, null);
 
-            plan.Files.Add(Planned(plan, templateKey, templateKey, fileName, content, templateConfig.Mode));
+            plan.Files.Add(Planned(plan, templateKey, templateKey, fileName, content, templateConfig));
         }
         catch (Exception ex)
         {
@@ -187,7 +198,7 @@ public static class GenerationPlanner
     /// would in a real one.
     /// </summary>
     private static PlannedFile Planned(
-        GenerationPlan plan, string templateKey, string reference, string fileName, string content, string mode)
+        GenerationPlan plan, string templateKey, string reference, string fileName, string content, TemplateConfig templateConfig)
     {
         var fullPath = FileWriter.ResolveContained(plan.OutputDir, fileName);
 
@@ -195,10 +206,11 @@ public static class GenerationPlanner
         {
             TemplateKey = templateKey,
             Reference = reference,
+            ModelFile = templateConfig.ModelFile,
             FullPath = fullPath,
             RelativePath = Path.GetRelativePath(plan.OutputDir, fullPath),
             Content = content,
-            Mode = mode
+            Mode = templateConfig.Mode
         };
     }
 

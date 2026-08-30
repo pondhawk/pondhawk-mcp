@@ -63,6 +63,7 @@ builder.Services
     .WithTools<ValidateConfigTool>()
     .WithTools<UpdateTool>()
     .WithTools<CheckTool>()
+    .WithTools<PruneTool>()
     .WithResources<AgentGuideResource>();
 
 var app = builder.Build();

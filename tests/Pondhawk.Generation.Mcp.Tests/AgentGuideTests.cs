@@ -14,6 +14,7 @@ public class AgentGuideTests
         typeof(InitTool),
         typeof(GenerateTool),
         typeof(CheckTool),
+        typeof(PruneTool),
         typeof(ListTemplatesTool),
         typeof(ValidateConfigTool),
         typeof(UpdateTool)

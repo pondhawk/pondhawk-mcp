@@ -161,7 +161,9 @@ public class GeneratePipelineTests : IDisposable
         FileWriter.WriteFile(_tempDir, name, content, "Always").Action.ShouldBe("Created");
         File.ReadAllText(path).ShouldContain("public partial class Product");
 
-        FileWriter.WriteFile(_tempDir, name, content, "Always").Action.ShouldBe("Overwritten");
+        // Same content again: nothing to do, and the file's timestamp stays put.
+        FileWriter.WriteFile(_tempDir, name, content, "Always").Action.ShouldBe("Unchanged");
+        FileWriter.WriteFile(_tempDir, name, content + "\n// edited", "Always").Action.ShouldBe("Overwritten");
         FileWriter.WriteFile(_tempDir, name, content, "SkipExisting").Action.ShouldBe("SkippedExisting");
     }
 

@@ -33,7 +33,7 @@ public class InitToolTests : IDisposable
         var result = InitTool.Execute(new ServerContext(_tempDir));
         var json = JsonDocument.Parse(result);
 
-        json.RootElement.GetProperty("FilesCreated").GetArrayLength().ShouldBe(8);
+        json.RootElement.GetProperty("FilesCreated").GetArrayLength().ShouldBe(9);
         File.Exists(Path_("pondhawk.project.json")).ShouldBeTrue();
         File.Exists(Path_("pondhawk.project.schema.json")).ShouldBeTrue();
         File.Exists(Path_("model.json")).ShouldBeTrue();

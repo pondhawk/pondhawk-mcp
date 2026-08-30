@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Text.Json;
 using Pondhawk.Generation.Configuration;
+using Pondhawk.Generation.Manifest;
 using Pondhawk.Generation.Models;
 using Pondhawk.Generation.Rendering;
 using Fluid;
@@ -33,13 +34,15 @@ public sealed class GenerateTool
 
         return dryRun
             ? Preview(plan, sw, logger)
-            : Write(plan, sw, logger);
+            : Write(ctx, plan, sw, logger);
     }
 
-    private static string Write(GenerationPlan plan, Stopwatch sw, ILogger logger)
+    private static string Write(ServerContext ctx, GenerationPlan plan, Stopwatch sw, ILogger logger)
     {
+        var manifest = ManifestStore.Load(ctx.ProjectDir);
+        manifest.OutputDir = plan.ConfiguredOutputDir;
         var filesWritten = new List<object>();
-        int created = 0, overwritten = 0, skipped = plan.DroppedByOverride, failed = plan.Failures.Count;
+        int created = 0, overwritten = 0, unchanged = 0, skipped = plan.DroppedByOverride, failed = plan.Failures.Count;
 
         foreach (var file in plan.Files)
         {
@@ -47,7 +50,8 @@ public sealed class GenerateTool
             {
                 var result = FileWriter.WriteResolved(file.FullPath, file.Content, file.Mode);
                 filesWritten.Add(new { file.RelativePath, result.Action });
-                Tally(result.Action, ref created, ref overwritten, ref skipped);
+                Tally(result.Action, ref created, ref overwritten, ref unchanged, ref skipped);
+                Record(manifest, plan, file, result.Action);
             }
             catch (Exception ex)
             {
@@ -67,7 +71,10 @@ public sealed class GenerateTool
         if (overwritten > 0) parts.Add($"{overwritten} files written");
         if (created > 0) parts.Add($"{created} files created");
         if (skipped > 0) parts.Add($"{skipped} files skipped");
+        if (unchanged > 0) parts.Add($"{unchanged} files already current");
         if (parts.Count == 0) parts.Add("nothing to generate — no nodes matched any template");
+
+        ManifestStore.Save(ctx.ProjectDir, manifest);
 
         sw.Stop();
         logger.LogInformation("Tool generate completed in {Duration}ms — {Summary}", sw.ElapsedMilliseconds, string.Join(", ", parts));
@@ -79,12 +86,39 @@ public sealed class GenerateTool
             Success = failed == 0,
             Created = created,
             Overwritten = overwritten,
+            Unchanged = unchanged,
             Skipped = skipped,
             Failed = failed,
             OutputDir = plan.OutputDir,
             FilesWritten = filesWritten,
             Summary = string.Join(", ", parts)
         }, new JsonSerializerOptions { WriteIndented = true });
+    }
+
+    /// <summary>
+    /// Records provenance for a file this run actually wrote.
+    /// </summary>
+    /// <remarks>
+    /// Only files pondhawk wrote are recorded, so the stored hash always answers "what did we
+    /// last put here" — the question hand-edit detection depends on. A SkipExisting file that
+    /// already existed is left alone: it is the developer's, this run did not write it, and
+    /// stamping our hash on it would erase the evidence that it diverged. Unchanged files are
+    /// recorded because their content is ours by definition, which also adopts files generated
+    /// before this project had a manifest.
+    /// </remarks>
+    private static void Record(GenerationManifest manifest, GenerationPlan plan, PlannedFile file, string action)
+    {
+        if (action is not ("Created" or "Overwritten" or "Unchanged"))
+            return;
+
+        manifest.Files[file.RelativePath] = new ManifestEntry
+        {
+            Template = file.TemplateKey,
+            Node = file.Reference,
+            Model = file.ModelFile,
+            Mode = file.Mode,
+            Hash = ManifestStore.HashContent(file.Content)
+        };
     }
 
     /// <summary>
@@ -184,12 +218,13 @@ public sealed class GenerateTool
         return context;
     }
 
-    private static void Tally(string action, ref int created, ref int overwritten, ref int skipped)
+    private static void Tally(string action, ref int created, ref int overwritten, ref int unchanged, ref int skipped)
     {
         switch (action)
         {
             case "Created": created++; break;
             case "Overwritten": overwritten++; break;
+            case "Unchanged": unchanged++; break;
             case "SkippedExisting":
             case "SkippedEmpty": skipped++; break;
         }

@@ -231,7 +231,8 @@ public class DryRunAndCheckTests : IDisposable
 
         var stale = Files(result, "Stale").ShouldHaveSingleItem();
         stale.GetProperty("RelativePath").GetString().ShouldBe("Product.cs");
-        stale.GetProperty("Reason").GetString().ShouldBe("Differs");
+        // The manifest knows what pondhawk wrote, so this is an edit rather than a stale render.
+        stale.GetProperty("Reason").GetString().ShouldBe("EditedSinceGenerated");
         stale.GetProperty("TemplateKey").GetString().ShouldBe("entity");
     }
 

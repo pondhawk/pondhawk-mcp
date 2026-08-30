@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Text;
 using System.Text.Json;
 using Pondhawk.Generation.Configuration;
+using Pondhawk.Generation.Manifest;
 using Pondhawk.Generation.Models;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
@@ -77,6 +78,9 @@ public sealed class InitTool
 
         File.WriteAllText(Path.Combine(ctx.ProjectDir, "AGENTS.md"), AgentGuide.Markdown, utf8NoBom);
 
+        // .pondhawk holds the manifest, which is committed, next to the logs, which are not.
+        ManifestStore.EnsureLogsIgnored(ctx.ProjectDir);
+
         var envPath = Path.Combine(ctx.ProjectDir, ".env");
         if (!File.Exists(envPath))
             File.WriteAllText(envPath, GetEnvFile(), utf8NoBom);
@@ -90,7 +94,8 @@ public sealed class InitTool
             "AGENTS.md",
             ".env",
             "templates/entity.generated.liquid",
-            "templates/entity.stub.liquid"
+            "templates/entity.stub.liquid",
+            ".pondhawk/.gitignore"
         };
 
         sw.Stop();

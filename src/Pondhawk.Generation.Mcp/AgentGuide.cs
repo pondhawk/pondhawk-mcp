@@ -50,6 +50,11 @@ public static class AgentGuide
         separate question -- are the files on disk already what the model produces -- and is
         what to run after pulling a branch.
 
+        `generate` records what it wrote in `.pondhawk/manifest.json`, which is meant to be
+        committed. That record is what lets `check` distinguish "the model changed" from
+        "somebody edited a generated file", and what lets `prune` delete files the model no
+        longer produces without touching anything it did not write.
+
         Two failure modes are quiet and worth guarding against explicitly:
 
           - `generate` can partially fail. Its result carries Success plus Created,
@@ -90,6 +95,7 @@ public static class AgentGuide
         | `model.json` | The default input model — what to generate |
         | `templates/*.liquid` | The templates — how to generate it |
         | `AGENTS.md` | This file |
+        | `.pondhawk/manifest.json` | What pondhawk has written. Commit it |
         | `.env` | Values kept out of version control |
 
         ## The input model
@@ -280,6 +286,7 @@ public static class AgentGuide
         | `init` | Scaffolds a new project |
         | `generate` | Renders templates and writes files; `dryRun: true` reports what would change instead |
         | `check` | Reports whether the files on disk are what the model and templates produce |
+        | `prune` | Removes generated files the model no longer produces. Reports unless told to apply |
         | `list_templates` | Lists configured templates |
         | `validate_config` | Checks config, templates and model without generating |
         | `update` | Refreshes AGENTS.md and JSON schemas after upgrading pondhawk |
@@ -334,10 +341,42 @@ public static class AgentGuide
         Steps 4 to 6 are cheap and the model is cached between calls, so run them as often as
         you like while iterating.
 
+        ## The manifest
+
+        `generate` records what it wrote in `.pondhawk/manifest.json` — for each file, the
+        template and node that produced it, the model, and a hash of the content written.
+        **Commit it.** Its whole value is knowing what happened in a tree you did not generate
+        yourself, so a copy that only exists on the machine that wrote it is worth little.
+        Regenerating an unchanged project leaves it byte-identical, so it stays quiet in
+        `git status`, and `.pondhawk/.gitignore` keeps the logs beside it out of version control.
+
+        It is a snapshot of the output tree, not a log of runs — every question asked of it is
+        about now, and git already keeps the history. Two consequences worth knowing:
+
+        - A run naming specific templates or items **merges** into the manifest rather than
+          replacing it, so generating one artifact does not orphan the others.
+        - An entry for a file that is no longer produced is **kept**. That entry is the only
+          evidence pondhawk wrote the file, and it is what lets `prune` delete it safely. Only
+          `prune` removes entries.
+
+        The hash separates two situations a content comparison cannot tell apart. When a
+        generated file differs from what the templates now produce, `check` reports
+        `InputsChanged` if the file is exactly as pondhawk left it — safe to regenerate — and
+        `EditedSinceGenerated` if it is not. The second means someone put work into a generated
+        file and regenerating will discard it; move that work into the template, or into a
+        `SkipExisting` file, before running `generate`.
+
+        `prune` deletes only files it can prove it owns: recorded in the manifest, still byte
+        for byte as pondhawk wrote them, and not `SkipExisting`. Anything else it reports and
+        leaves alone. It reports without deleting unless you pass `apply: true`.
+
+        ## Checking a project you did not generate
+
         `check` answers a different question: are the files on disk already what the model
         produces? Run it after pulling a branch, or before trusting generated code you did not
-        just generate. It writes nothing and reports every stale file with a reason — `Missing`
-        or `Differs` — but no diffs; use `generate` with `dryRun` for those. A `SkipExisting`
-        stub that exists is never stale, because `generate` would not touch it.
+        just generate. It writes nothing, reports every stale file with a reason — `Missing`,
+        `InputsChanged`, `EditedSinceGenerated` — and lists orphans the manifest records but the
+        configuration no longer produces. No diffs; use `generate` with `dryRun` for those. A
+        `SkipExisting` stub that exists is never stale, because `generate` would not touch it.
         """;
 }

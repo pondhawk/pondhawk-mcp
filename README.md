@@ -142,7 +142,8 @@ Validate the config, then generate
 |------|-------------|
 | `init` | Scaffolds a new project with config, model, templates, schemas, and AGENTS.md |
 | `generate` | Renders templates against the model and writes files; `dryRun: true` reports what would change instead, with unified diffs, and writes nothing |
-| `check` | Reports whether the files on disk are what the model and templates currently produce |
+| `check` | Reports whether the files on disk are what the model and templates currently produce, and lists orphans |
+| `prune` | Removes generated files the model no longer produces; reports unless passed `apply` |
 | `list_templates` | Lists configured templates with their settings |
 | `validate_config` | Checks config, templates, and model without generating |
 | `update` | Refreshes AGENTS.md and JSON schemas after a server upgrade |
@@ -161,6 +162,30 @@ the protocol, so a bare MCP connection is enough to work from.
 The resource is served from the binary rather than read off disk, so it always matches the
 running server and is readable before `init` has created anything. `init` and `update` write
 the same text into the project as `AGENTS.md` for people and for file-based coding agents.
+
+## The manifest
+
+`generate` records what it wrote in `.pondhawk/manifest.json` — per file, the template and node
+that produced it, the model, and a hash of the content. **Commit it.** Its value is knowing what
+happened in a tree you did not generate yourself, so a copy confined to the machine that wrote it
+is worth little. Regenerating an unchanged project leaves it byte-identical — no timestamps, no
+run counters — so it stays quiet in `git status`, and `.pondhawk/.gitignore` keeps the log
+directory beside it out of version control.
+
+It is a snapshot of the output tree, not a log of runs; git already keeps the history. A filtered
+run merges into it rather than replacing it, and an entry for a file no longer produced is kept —
+that entry is the only evidence pondhawk wrote the file, and it is what makes safe deletion
+possible. Only `prune` removes entries.
+
+The hash separates two things a content comparison cannot:
+
+| File vs manifest | File vs freshly rendered | `check` reports | Meaning |
+|---|---|---|---|
+| same | differs | `InputsChanged` | The model or template moved on. Safe to regenerate. |
+| differs | differs | `EditedSinceGenerated` | Someone edited generated output. Regenerating discards it. |
+
+`prune` deletes only what it can prove it owns: recorded in the manifest, byte for byte as
+pondhawk wrote it, and not `SkipExisting`. Everything else it reports and leaves alone.
 
 ## Configuration
 

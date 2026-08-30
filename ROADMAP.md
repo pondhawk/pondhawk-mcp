@@ -30,9 +30,9 @@ timestamps, machine paths, and any non-deterministic ordering before building on
 including the escape refusal — a preview that shows a file the real run would reject is worse
 than no preview.
 
-## 2. A manifest
+## 2. A manifest — **done**
 
-`[ ]` Record what was written: path, template key, source node, content hash
+`[x]` Record what was written: path, template key, source node, content hash
 (`.pondhawk/manifest.json`).
 
 **Why.** Small, and it makes three currently-impossible things possible:
@@ -44,8 +44,10 @@ than no preview.
 - **Hand-edit detection.** An `Always` file whose hash has drifted means someone edited
   generated output and is about to lose that work. There is nowhere for that warning to come
   from today.
-- **Incremental generation.** Skip files whose model subtree, template and values are all
-  unchanged. The natural payoff of the timestamp cache that already exists.
+- **Write avoidance.** Done, and it needed no manifest: item 1's content comparison already
+  says when a file is already correct, so `generate` leaves it untouched rather than rewriting
+  it identically and waking every watcher downstream. Skipping the *render* too would need
+  input hashing, and rendering was never the expensive part.
 
 ## 3. Shared macros
 
