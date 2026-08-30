@@ -84,7 +84,7 @@ public class DryRunAndCheckTests : IDisposable
 
         result.GetProperty("Unchanged").GetInt32().ShouldBe(2);
         result.GetProperty("WouldOverwrite").GetInt32().ShouldBe(0);
-        result.GetProperty("Summary").GetString().ShouldContain("already current");
+        result.GetProperty("Summary").GetString()!.ShouldContain("already current");
     }
 
     [Fact]
@@ -153,7 +153,7 @@ public class DryRunAndCheckTests : IDisposable
 
         result.GetProperty("Failed").GetInt32().ShouldBe(1);
         result.GetProperty("Success").GetBoolean().ShouldBeFalse();
-        Files(result, "FilesPlanned")[0].GetProperty("Error").GetString().ShouldContain("Refusing to write");
+        Files(result, "FilesPlanned")[0].GetProperty("Error").GetString()!.ShouldContain("Refusing to write");
     }
 
     [Fact]

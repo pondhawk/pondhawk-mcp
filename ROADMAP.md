@@ -69,15 +69,27 @@ four times, and the moment those drift the fleet stops being uniform in exactly 
 tool exists to prevent. `TemplateOptions` sets no `FileProvider` today, so `{% include %}` and
 `{% render %}` are not wired up at all.
 
-## 4. `describe_model`
+## 4. `describe_model` — **done**
 
-`[ ]` Report the Kind vocabulary, metadata keys observed per Kind with counts, node counts and
+`[x]` Report the Kind vocabulary, metadata keys observed per Kind with counts, node counts and
 tree depth.
 
 **Why.** The guide tells an agent to reuse the Kinds already in use, and not to introduce
 `DataType` beside an existing `Type` — then gives it no way to see either without reading the
 whole model. On a large model that is expensive and easy to skim. This turns a stated
 obligation into something checkable.
+
+**Built with notices**, which is what separates it from a dump: it flags a sparse key beside a
+similarly-named dominant one, near-duplicate and plural/singular Kinds, one key holding two
+value types, and Kinds differing only in case — the last because `AppliesTo` matches
+case-insensitively while dispatch builds the macro name from the literal Kind, so `Class` and
+`class` silently resolve to different macros.
+
+**Considered and rejected:** cross-referencing Kinds against declared `Default<Kind>` macros to
+flag a Kind nothing can render. Since item 3 macros are per template plus partials, so that is a
+per-template question, and a single global answer would be confidently wrong for any project
+with more than one template — and would also false-alarm on Kinds rendered directly by a
+template body rather than through dispatch.
 
 ## 5. `preview`
 

@@ -43,6 +43,26 @@ Nodes nest to any depth. Two levels suit a class with properties; three suit a r
 
 You write the model, or an agent does. To generate from an existing database, pair pondhawk with a schema-aware MCP server and have the agent feed one from the other — pondhawk does not connect to databases itself.
 
+## Reading a model you did not write
+
+`describe_model` reports a model's conventions rather than its contents: the Kind vocabulary with
+counts and example names, which Kinds nest inside which, the metadata keys each Kind carries and
+how many of its nodes carry them, and notices about inconsistencies. It reports counts and
+vocabularies, never node listings, so a five-hundred-node model summarises to about the size of a
+twenty-node one.
+
+The notices are the point. Extending a model means matching what is already there, and the ways
+that quietly goes wrong are recognisable:
+
+- `DataType` on 2 of 44 nodes beside `Type` on 44 of 44 — a second name for one concept.
+- `Property` beside `Properties`, or a Kind that is a one-character typo of another.
+- `Class` beside `class` — `AppliesTo` matches case-insensitively, but dispatch builds the macro
+  name from the literal Kind, so those resolve to `DefaultClass` and `Defaultclass`.
+- One metadata key holding both `boolean` and `string` values.
+
+A sparse key with no similarly-named rival is not flagged; an optional flag on a few nodes is
+ordinary modelling.
+
 ## Dispatch
 
 `Kind` selects the macro that renders a node. Write one `Default<Kind>` macro per kind:
@@ -145,6 +165,7 @@ Validate the config, then generate
 | `check` | Reports whether the files on disk are what the model and templates currently produce, and lists orphans |
 | `prune` | Removes generated files the model no longer produces; reports unless passed `apply` |
 | `list_templates` | Lists configured templates with their settings |
+| `describe_model` | Summarises a model's Kinds, structure, metadata keys and inconsistencies without listing its nodes |
 | `validate_config` | Checks config, templates, and model without generating |
 | `update` | Refreshes AGENTS.md and JSON schemas after a server upgrade |
 

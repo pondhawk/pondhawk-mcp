@@ -117,7 +117,7 @@ public class McpServerContractTests(McpServerFixture server) : IClassFixture<Mcp
         var tools = await _client.ListToolsAsync();
 
         tools.Select(t => t.Name).ShouldBe(
-            ["init", "generate", "check", "prune", "list_templates", "validate_config", "update"],
+            ["init", "generate", "check", "prune", "list_templates", "describe_model", "validate_config", "update"],
             ignoreOrder: true);
 
         foreach (var tool in tools)

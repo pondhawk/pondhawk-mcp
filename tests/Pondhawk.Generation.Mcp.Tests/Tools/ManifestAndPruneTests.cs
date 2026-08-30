@@ -213,7 +213,7 @@ public class ManifestAndPruneTests : IDisposable
         result.GetProperty("UpToDate").GetBoolean().ShouldBeFalse();
         var orphan = result.GetProperty("Orphans").EnumerateArray().ShouldHaveSingleItem();
         orphan.GetProperty("RelativePath").GetString().ShouldBe("Category.cs");
-        result.GetProperty("Summary").GetString().ShouldContain("prune");
+        result.GetProperty("Summary").GetString()!.ShouldContain("prune");
     }
 
     [Fact]
@@ -273,7 +273,7 @@ public class ManifestAndPruneTests : IDisposable
             .GetProperty("Stale").EnumerateArray().First();
 
         stale.GetProperty("Reason").GetString().ShouldBe("Differs");
-        stale.GetProperty("Detail").GetString().ShouldContain("No manifest entry");
+        stale.GetProperty("Detail").GetString()!.ShouldContain("No manifest entry");
     }
 
     // --- prune ----------------------------------------------------------------
@@ -288,7 +288,7 @@ public class ManifestAndPruneTests : IDisposable
 
         result.GetProperty("Pruned").GetInt32().ShouldBe(1);
         result.GetProperty("NothingWritten").GetBoolean().ShouldBeTrue();
-        result.GetProperty("Summary").GetString().ShouldContain("would be deleted");
+        result.GetProperty("Summary").GetString()!.ShouldContain("would be deleted");
         File.Exists(Path.Combine(_outputDir, "Category.cs")).ShouldBeTrue();
     }
 
@@ -367,7 +367,7 @@ public class ManifestAndPruneTests : IDisposable
         var result = Json(PruneTool.Execute(Configure(outputDir: "elsewhere"), apply: true));
 
         result.GetProperty("Refused").GetBoolean().ShouldBeTrue();
-        result.GetProperty("Reason").GetString().ShouldContain("OutputDir has changed");
+        result.GetProperty("Reason").GetString()!.ShouldContain("OutputDir has changed");
         File.Exists(Path.Combine(_outputDir, "Product.cs")).ShouldBeTrue();
     }
 
@@ -379,7 +379,7 @@ public class ManifestAndPruneTests : IDisposable
         var result = Json(PruneTool.Execute(new ServerContext(_tempDir), apply: true));
 
         result.GetProperty("Pruned").GetInt32().ShouldBe(0);
-        result.GetProperty("Summary").GetString().ShouldContain("Nothing to prune");
+        result.GetProperty("Summary").GetString()!.ShouldContain("Nothing to prune");
         Directory.GetFiles(_outputDir).Length.ShouldBe(2);
     }
 

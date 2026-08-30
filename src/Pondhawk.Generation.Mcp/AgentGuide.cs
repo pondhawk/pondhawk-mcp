@@ -43,8 +43,10 @@ public static class AgentGuide
         will not do it, because the macro is discarded before dispatch looks for it.
 
         Nothing writes model.json for you after `init` -- edit it with ordinary file tools.
-        Read it before extending it and reuse the Kinds and metadata keys already in use;
-        introducing a second convention is the usual way a generated set stops being uniform.
+        Reuse the Kinds and metadata keys already in use; introducing a second convention is the
+        usual way a generated set stops being uniform. Run `describe_model` before extending a
+        model: it reports the Kind vocabulary, the metadata keys each Kind carries and how many
+        nodes carry them, and flags inconsistencies, without your having to read the whole file.
 
         The loop is: edit the model or templates, run `validate_config`, then `generate` with
         `dryRun: true` to read the diffs, then `generate` for real. All are cheap and results
@@ -318,6 +320,7 @@ public static class AgentGuide
         | `check` | Reports whether the files on disk are what the model and templates produce |
         | `prune` | Removes generated files the model no longer produces. Reports unless told to apply |
         | `list_templates` | Lists configured templates |
+        | `describe_model` | Summarises a model's Kinds, metadata keys and inconsistencies |
         | `validate_config` | Checks config, templates and model without generating |
         | `update` | Refreshes AGENTS.md and JSON schemas after upgrading pondhawk |
 
@@ -334,7 +337,12 @@ public static class AgentGuide
         Working on one carries obligations:
 
         - **Read the existing model before adding to it.** You are extending a document that
-          already has conventions, not starting a new one.
+          already has conventions, not starting a new one. `describe_model` reports them
+          directly, which is cheaper and more reliable than skimming the file.
+        - **Kinds are case-sensitive where it counts.** A template's `AppliesTo` matches a Kind
+          case-insensitively, but dispatch builds the macro name from the literal Kind, so
+          `Class` and `class` resolve to `DefaultClass` and `Defaultclass` — two different
+          macros. `describe_model` reports the pair as a notice.
         - **Reuse the Kinds already in use.** Adding a node of Kind `Field` to a model that
           says `Property` everywhere else creates a second convention and a second macro, and
           the set stops being uniform. The same goes for metadata keys: if existing properties
@@ -353,7 +361,11 @@ public static class AgentGuide
 
         ## Working on a pondhawk project
 
-        1. Read `model.json` and the templates before changing either.
+        1. Run `describe_model`, then read the templates. The description gives you the Kind
+           vocabulary, which Kinds nest inside which, the metadata keys each Kind carries and
+           how many nodes carry them — the conventions you have to match — without reading a
+           model that may be hundreds of nodes long. Read its `Notices` first; they are where a
+           second convention already creeping in shows up.
         2. Edit `model.json` — adding, changing, or removing nodes.
         3. Author or adjust templates, one `Default<Kind>` macro per Kind.
         4. Run `validate_config`. It reports unparseable templates, unknown filters, a model that

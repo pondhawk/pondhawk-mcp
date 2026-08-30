@@ -64,6 +64,7 @@ builder.Services
     .WithTools<UpdateTool>()
     .WithTools<CheckTool>()
     .WithTools<PruneTool>()
+    .WithTools<DescribeModelTool>()
     .WithResources<AgentGuideResource>();
 
 var app = builder.Build();
