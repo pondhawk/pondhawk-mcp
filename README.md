@@ -496,6 +496,26 @@ Pass `--threshold=N` to fail the build when line coverage drops below `N` percen
 dotnet run --project build -- --target=Coverage --threshold=90
 ```
 
+### Releasing
+
+The git tag is the version. Pushing a `v*` tag builds, tests, publishes and creates the GitHub
+release, stamping the tag into the binaries:
+
+```bash
+git tag v2.0.0 && git push origin v2.0.0
+```
+
+The stamped version is what the server reports in its MCP handshake, so a client always sees the
+release it is actually talking to. A local `dotnet run --project build -- --target=Publish`
+leaves the default `0.0.0-dev`, which no release will ever carry — a hand-built binary cannot be
+mistaken for one that shipped. To reproduce a release build locally, pass the tag:
+
+```bash
+dotnet run --project build -- --target=Publish --release-version=v2.0.0
+```
+
+(`--release-version` rather than `--version`, which Cake reserves for itself.)
+
 ### Published Binaries
 
 The `Publish` target produces self-contained single-file executables (no .NET runtime required):

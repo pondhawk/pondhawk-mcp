@@ -75,6 +75,16 @@ public class McpServerContractTests(McpServerFixture server) : IClassFixture<Mcp
         _client.ServerInfo.Name.ShouldBe("pondhawk-generation");
     }
 
+    [Fact]
+    public void Handshake_ReportsTheVersionThisBinaryWasBuiltAs()
+    {
+        // It used to report a literal "1.0.0" regardless of what was released, so a v1.1.1
+        // binary introduced itself as 1.0.0. The number now comes from the assembly, which CI
+        // stamps from the release tag.
+        _client.ServerInfo.Version.ShouldBe(ServerVersion.Current);
+        _client.ServerInfo.Version.ShouldNotBeNullOrWhiteSpace();
+    }
+
     // --- The guide resource --------------------------------------------------
 
     [Fact]

@@ -137,4 +137,12 @@ public class CheckCommandTests : IDisposable
             process.Kill(entireProcessTree: true);
         }
     }
+
+    [Fact]
+    public void ALocalBuildIsNotMistakableForARelease()
+    {
+        // Directory.Build.props defaults to a version no release will ever carry, so a
+        // hand-built binary cannot be confused with one that shipped.
+        ServerVersion.Current.ShouldBe("0.0.0-dev");
+    }
 }

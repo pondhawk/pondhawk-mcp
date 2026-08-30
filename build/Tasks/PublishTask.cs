@@ -1,3 +1,4 @@
+using Cake.Common.Diagnostics;
 using Cake.Common.IO;
 using Cake.Common.Tools.DotNet;
 using Cake.Common.Tools.DotNet.Publish;
@@ -21,11 +22,21 @@ public sealed class PublishTask : FrostingTask<BuildContext>
                 Runtime = rid,
                 SelfContained = true,
                 OutputDirectory = $"publish/{rid}",
-                ArgumentCustomization = args => args
-                    .Append("-p:PublishSingleFile=true")
-                    .Append("-p:IncludeNativeLibrariesForSelfExtract=true")
-                    .Append("-p:EnableCompressionInSingleFile=true")
-                    .Append("-p:DebugType=embedded")
+                ArgumentCustomization = args =>
+                {
+                    args = args
+                        .Append("-p:PublishSingleFile=true")
+                        .Append("-p:IncludeNativeLibrariesForSelfExtract=true")
+                        .Append("-p:EnableCompressionInSingleFile=true")
+                        .Append("-p:DebugType=embedded");
+
+                    // The binary reports this to every client in the MCP handshake, so a
+                    // release must be stamped with the tag it was cut from.
+                    if (context.Version is { } version)
+                        args = args.Append($"-p:Version={version}");
+
+                    return args;
+                }
             });
         }
 
@@ -33,5 +44,9 @@ public sealed class PublishTask : FrostingTask<BuildContext>
         {
             context.CopyFile("docs/guide.html", $"publish/{rid}/guide.html");
         }
+
+        context.Information(context.Version is { } stamped
+            ? $"Published version {stamped}."
+            : "Published a local build — no --release-version given, so the binaries report 0.0.0-dev.");
     }
 }

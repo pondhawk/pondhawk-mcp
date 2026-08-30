@@ -19,7 +19,9 @@ jobs:
           dotnet-version: "10.0.x"
 
       - name: Build, Test, and Publish
-        run: dotnet run --project build -- --target=Publish
+        # The tag is the version. Passing it here is what makes the binary report the same
+        # number in its MCP handshake as the release it came from.
+        run: dotnet run --project build -- --target=Publish --release-version=${{ github.ref_name }}
 
       - name: Rename binaries with platform suffixes
         run: |

@@ -60,7 +60,7 @@ builder.Services
         options.ServerInfo = new()
         {
             Name = "pondhawk-generation",
-            Version = "1.0.0"
+            Version = ServerVersion.Current
         };
 
         // Sent in the initialize handshake. Without it a connecting agent is told only the
