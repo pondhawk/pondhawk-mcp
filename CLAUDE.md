@@ -20,3 +20,17 @@ Always run tests using `dotnet run` (not `dotnet test`) because xunit v3 project
 dotnet run --project tests/Pondhawk.Generation.Tests --configuration Release
 dotnet run --project tests/Pondhawk.Generation.Mcp.Tests --configuration Release
 ```
+
+### Coverage
+
+```bash
+dotnet run --project build -- --target=Coverage
+```
+
+Merges both suites into `coverage/report/index.html` and prints a summary. Add
+`--threshold=N` to fail below N percent line coverage. Tools are restored from
+`dotnet-tools.json`; nothing needs installing globally.
+
+The report covers **assembly** names, not project names -- the MCP server builds as
+`pondhawk-generation-mcp`. If an assembly is renamed, update `CoveredAssemblies` in
+`build/Tasks/CoverageTask.cs` or the target will fail rather than silently omit it.

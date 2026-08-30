@@ -271,6 +271,23 @@ dotnet run --project tests/Pondhawk.Generation.Tests --configuration Release
 dotnet run --project tests/Pondhawk.Generation.Mcp.Tests --configuration Release
 ```
 
+### Coverage
+
+```bash
+dotnet run --project build -- --target=Coverage
+```
+
+Runs both suites under a coverage collector, merges the results, and writes an HTML
+report to `coverage/report/index.html` alongside a summary printed to the console.
+The collector and report generator are pinned in `dotnet-tools.json` and restored
+automatically, so no global install is needed.
+
+Pass `--threshold=N` to fail the build when line coverage drops below `N` percent:
+
+```bash
+dotnet run --project build -- --target=Coverage --threshold=90
+```
+
 ### Published Binaries
 
 The `Publish` target produces self-contained single-file executables (no .NET runtime required):
