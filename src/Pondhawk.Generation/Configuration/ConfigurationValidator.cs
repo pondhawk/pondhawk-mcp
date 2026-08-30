@@ -53,7 +53,8 @@ public static class ConfigurationValidator
         var models = LoadModels(config, projectDir, result);
 
         ValidateRequiredSections(config, result);
-        var macrosByTemplate = ValidateTemplates(config, projectDir, models, result);
+        var partials = ValidatePartials(config, projectDir, result);
+        var macrosByTemplate = ValidateTemplates(config, projectDir, models, partials, result);
         ValidateOverrides(config, models, macrosByTemplate, result);
         ValidateLogging(config, result);
         CheckUnresolvedEnvVars(config, result);
@@ -114,9 +115,56 @@ public static class ConfigurationValidator
             result.Errors.Add("Required section 'Templates' is missing or empty");
     }
 
+    /// <summary>
+    /// Validates the shared macro files in their own right and returns their sources, in order.
+    /// </summary>
+    /// <remarks>
+    /// Each partial is parsed on its own rather than as part of a composed document, so a syntax
+    /// error is reported against the file it is in, at its real line number, instead of being
+    /// attributed to every template that shares it at an offset.
+    /// </remarks>
+    private static List<string> ValidatePartials(
+        ProjectConfiguration config, string projectDir, ValidationResult result)
+    {
+        var sources = new List<string>();
+        var parser = TemplateEngine.CreateParser();
+
+        foreach (var partial in config.Partials)
+        {
+            string fullPath;
+            try
+            {
+                fullPath = FileWriter.ResolveContained(projectDir, partial);
+            }
+            catch (Exception ex)
+            {
+                result.Errors.Add($"Partial '{partial}': {ex.Message}");
+                continue;
+            }
+
+            if (!File.Exists(fullPath))
+            {
+                result.Errors.Add($"Partial '{partial}': File not found");
+                continue;
+            }
+
+            var source = File.ReadAllText(fullPath);
+            sources.Add(source);
+
+            if (!parser.TryParse(source, out _, out var error))
+                result.Errors.Add($"Partial '{partial}': Liquid parse error: {error}");
+
+            foreach (var filterName in TemplateEngine.ValidateFilterNames(source))
+                result.Warnings.Add($"Partial '{partial}': Unknown filter '{filterName}'");
+        }
+
+        return sources;
+    }
+
     /// <summary>Validates each template and returns the macro names each one declares.</summary>
     private static Dictionary<string, HashSet<string>> ValidateTemplates(
-        ProjectConfiguration config, string projectDir, Dictionary<string, ModelFile?> models, ValidationResult result)
+        ProjectConfiguration config, string projectDir, Dictionary<string, ModelFile?> models,
+        List<string> partials, ValidationResult result)
     {
         var macrosByTemplate = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
         var parser = TemplateEngine.CreateParser();
@@ -154,7 +202,13 @@ public static class ConfigurationValidator
                     foreach (var filterName in TemplateEngine.ValidateFilterNames(source))
                         result.Warnings.Add($"Template '{key}': Unknown filter '{filterName}' in '{template.Path}'");
 
-                    macrosByTemplate[key] = TemplateEngine.ExtractMacroNames(source);
+                    // Macros are extracted from the composed source, because a variant macro
+                    // living in a shared partial is just as available to dispatch as one in the
+                    // template. Extracting from this file alone would report a correct project
+                    // as declaring no such macro — a false error on the check that exists to
+                    // catch a silently-ignored override.
+                    macrosByTemplate[key] = TemplateEngine.ExtractMacroNames(
+                        TemplateComposer.Compose(partials, source));
                 }
             }
 

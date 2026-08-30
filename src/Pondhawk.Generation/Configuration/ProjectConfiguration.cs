@@ -23,6 +23,12 @@ public sealed class ProjectConfiguration
     [JsonConverter(typeof(PlainDictionaryConverter))]
     public Dictionary<string, object?> Values { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Liquid files whose macros every template shares, applied in order ahead of each
+    /// template. A template that declares the same macro shadows the shared one.
+    /// </summary>
+    public List<string> Partials { get; set; } = [];
+
     public List<OverrideConfig> Overrides { get; set; } = [];
     public LoggingConfig Logging { get; set; } = new();
 }

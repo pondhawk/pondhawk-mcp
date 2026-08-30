@@ -18,7 +18,7 @@ public sealed class TimestampCache
     private DateTime _configTimestamp;
     private ProjectConfiguration? _cachedConfig;
 
-    private readonly Dictionary<string, DateTime> _templateTimestamps = new();
+    private readonly Dictionary<string, string> _templateSignatures = new();
     private readonly Dictionary<string, IFluidTemplate> _compiledTemplates = new();
 
     // Keyed by path: a project can declare several models, and switching between them on
@@ -58,31 +58,69 @@ public sealed class TimestampCache
     }
 
     /// <summary>
-    /// Gets a compiled template, recompiling from disk if the file has been modified.
+    /// Gets a compiled template, recompiling when the file — or any partial composed into
+    /// it — has been modified.
     /// </summary>
-    public IFluidTemplate GetTemplate(string templatePath)
+    /// <remarks>
+    /// A template's cached form depends on every file that contributes to it. Keying only on
+    /// the template's own timestamp would serve a stale compilation after a shared macro was
+    /// edited, so the first generate after that change would silently render the old macro.
+    /// </remarks>
+    public IFluidTemplate GetTemplate(string templatePath, IReadOnlyList<string>? partialPaths = null)
     {
         lock (_gate)
         {
-            var currentTimestamp = File.GetLastWriteTimeUtc(templatePath);
+            partialPaths ??= [];
+            var signature = InputSignature(templatePath, partialPaths);
 
             if (_compiledTemplates.TryGetValue(templatePath, out var cached) &&
-                _templateTimestamps.TryGetValue(templatePath, out var cachedTs) &&
-                cachedTs == currentTimestamp)
+                _templateSignatures.TryGetValue(templatePath, out var cachedSignature) &&
+                cachedSignature == signature)
             {
                 return cached;
             }
 
-            var source = File.ReadAllText(templatePath);
+            var partialSources = partialPaths.Select(File.ReadAllText).ToList();
+            var source = TemplateComposer.Compose(partialSources, File.ReadAllText(templatePath));
+
             if (!_templateEngine.TryParse(source, out var template, out var error))
             {
-                throw new InvalidOperationException($"Failed to parse template '{templatePath}': {error}");
+                throw new InvalidOperationException(
+                    $"Failed to parse template '{Blame(templatePath, partialPaths, partialSources)}': {error}");
             }
 
-            _templateTimestamps[templatePath] = currentTimestamp;
+            _templateSignatures[templatePath] = signature;
             _compiledTemplates[templatePath] = template;
             return template;
     }
+    }
+
+    /// <summary>
+    /// Identifies the exact inputs a cached compilation was built from. A composite rather than
+    /// a max timestamp, so a partial being added, removed, reordered or reverted to an older
+    /// modification time all invalidate correctly.
+    /// </summary>
+    private static string InputSignature(string templatePath, IReadOnlyList<string> partialPaths)
+    {
+        var parts = partialPaths
+            .Append(templatePath)
+            .Select(path => $"{path}@{File.GetLastWriteTimeUtc(path).Ticks}");
+
+        return string.Join("|", parts);
+    }
+
+    /// <summary>
+    /// Names the file a parse error is actually in. The composed source is parsed as one
+    /// document, so a broken partial would otherwise be reported against every template that
+    /// shares it.
+    /// </summary>
+    private string Blame(string templatePath, IReadOnlyList<string> partialPaths, List<string> partialSources)
+    {
+        for (var i = 0; i < partialPaths.Count; i++)
+            if (!_templateEngine.TryParse(partialSources[i], out _, out _))
+                return partialPaths[i];
+
+        return templatePath;
     }
 
     /// <summary>
@@ -122,7 +160,7 @@ public sealed class TimestampCache
             _cachedConfig = null;
             _configPath = null;
             _configTimestamp = default;
-            _templateTimestamps.Clear();
+            _templateSignatures.Clear();
             _compiledTemplates.Clear();
             _cachedModels.Clear();
             _modelTimestamps.Clear();
@@ -136,7 +174,7 @@ public sealed class TimestampCache
     {
         lock (_gate)
         {
-            _templateTimestamps.Remove(templatePath);
+            _templateSignatures.Remove(templatePath);
             _compiledTemplates.Remove(templatePath);
     }
     }
@@ -161,15 +199,14 @@ public sealed class TimestampCache
     /// Checks if a template file has changed since last compilation.
     /// Returns true if stale (needs recompilation).
     /// </summary>
-    public bool IsTemplateStale(string templatePath)
+    public bool IsTemplateStale(string templatePath, IReadOnlyList<string>? partialPaths = null)
     {
         lock (_gate)
         {
-            if (!_templateTimestamps.TryGetValue(templatePath, out var cachedTs))
+            if (!_templateSignatures.TryGetValue(templatePath, out var cachedSignature))
                 return true;
 
-            var currentTimestamp = File.GetLastWriteTimeUtc(templatePath);
-            return cachedTs != currentTimestamp;
+            return cachedSignature != InputSignature(templatePath, partialPaths ?? []);
     }
     }
 

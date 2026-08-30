@@ -49,10 +49,18 @@ than no preview.
   it identically and waking every watcher downstream. Skipping the *render* too would need
   input hashing, and rendering was never the expensive part.
 
-## 3. Shared macros
+## 3. Shared macros — **done**
 
-`[ ]` Configure a Fluid `FileProvider` rooted at `templates/`, enabling `{% include %}` and a
-shared partials file.
+`[x]` A top-level `Partials` list, composed into every template's source before parsing.
+
+**Correction.** This entry originally proposed a Fluid `FileProvider` and `{% include %}`. That
+does not work, and it was worth finding out by experiment rather than by shipping: dispatch
+resolves a macro by name in the template context at render time, and Fluid renders an include in
+a *child* scope, so the macro is created and discarded before dispatch looks for it. Measured
+side by side, an included macro yields
+`/* dispatch error: macro 'DefaultProperty' not found */` while the same macro concatenated
+ahead of the template renders correctly. `{% include %}` is deliberately still not enabled — it
+would look like a second way to share macros and quietly fail.
 
 **Why.** This is the gap that undermines the core promise. "Every node of a Kind goes through
 one macro, so changing that macro changes every artifact at once" holds *within* a template

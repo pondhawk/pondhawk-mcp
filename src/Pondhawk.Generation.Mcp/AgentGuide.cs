@@ -38,7 +38,9 @@ public static class AgentGuide
 
         `{% dispatch node %}` in a template calls the macro matching that node's Kind, which
         is what keeps a generated set uniform. An override can point a single node at a
-        `<Variant><Kind>` macro instead.
+        `<Variant><Kind>` macro instead. Macros several templates share go in a file listed
+        under `Partials`, which is joined ahead of every template -- Liquid's `{% include %}`
+        will not do it, because the macro is discarded before dispatch looks for it.
 
         Nothing writes model.json for you after `init` -- edit it with ordinary file tools.
         Read it before extending it and reuse the Kinds and metadata keys already in use;
@@ -94,6 +96,7 @@ public static class AgentGuide
         | `pondhawk.project.json` | Configuration: templates, output directory, values, overrides |
         | `model.json` | The default input model — what to generate |
         | `templates/*.liquid` | The templates — how to generate it |
+        | `templates/_*.liquid` | Shared macros, if the config lists them under `Partials` |
         | `AGENTS.md` | This file |
         | `.pondhawk/manifest.json` | What pondhawk has written. Commit it |
         | `.env` | Values kept out of version control |
@@ -162,6 +165,32 @@ public static class AgentGuide
         This is what keeps a generated set consistent: every node of a Kind goes through one
         macro, so changing that macro changes every artifact at once.
 
+        ### Sharing macros between templates
+
+        A macro written in a template belongs to that template. When several artifacts render
+        the same Kinds — an entity, a DTO, a validator all rendering `Property` — put the macros
+        in a shared file and list it under `Partials`:
+
+        ```json
+        { "Partials": ["templates/_macros.liquid"] }
+        ```
+
+        Partials are joined onto the front of every template before it is parsed, in the order
+        listed, with the template itself last. So a template that declares a macro of its own
+        shadows the shared one: a project-wide default, overridable per artifact.
+
+        This is what keeps the promise across a *set* of artifacts rather than within one file.
+        Four templates each carrying their own copy of `DefaultProperty` drift apart, and the
+        moment they do the fleet stops being uniform.
+
+        Do not reach for Liquid's `{% include %}` for this. Fluid renders an include in a child
+        scope, so a macro declared in the included file is discarded before `{% dispatch %}`
+        looks for it — the include succeeds, the macro is not found, and an error comment lands
+        in the generated file. `Partials` is the mechanism that works.
+
+        One edit to a shared macro changes every artifact that uses it, which is the point and
+        also the risk: run `generate` with `dryRun: true` afterwards and read the diffs.
+
         ### Variants
 
         When one node needs to render differently, define a variant macro — `<Variant><Kind>` —
@@ -209,6 +238,7 @@ public static class AgentGuide
         - **Mode** — `Always` overwrites every run; `SkipExisting` writes once and then leaves it alone.
         - **AppliesTo** — restricts a template to top-level nodes of one Kind. Omit for all.
         - **Model** — the model file this template reads. Omit for `model.json`.
+        - **Partials** — top level, not per template. Liquid files whose macros every template shares.
         - **Values** — anything templates need. String values support `${VAR}` from `.env`.
 
         ### More than one model

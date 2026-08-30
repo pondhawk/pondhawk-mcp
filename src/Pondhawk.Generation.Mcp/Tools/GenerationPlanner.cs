@@ -81,6 +81,11 @@ public static class GenerationPlanner
 
         var plan = new GenerationPlan { OutputDir = outputDir, ConfiguredOutputDir = config.OutputDir };
 
+        // Shared macro files, composed ahead of every template. Resolved once for the run.
+        var partialPaths = config.Partials
+            .Select(partial => Path.IsPathRooted(partial) ? partial : Path.Combine(ctx.ProjectDir, partial))
+            .ToList();
+
         // Templates may read different models, so each one is loaded on demand and cached for
         // the run. A missing model is a project-setup error like an uncompilable template, not a
         // per-node data error, so it stops the run rather than being tallied as a failed file.
@@ -104,7 +109,7 @@ public static class GenerationPlanner
             IFluidTemplate compiledTemplate;
             try
             {
-                compiledTemplate = ctx.Cache.GetTemplate(templatePath);
+                compiledTemplate = ctx.Cache.GetTemplate(templatePath, partialPaths);
             }
             catch (Exception ex)
             {

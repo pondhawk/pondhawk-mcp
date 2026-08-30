@@ -221,9 +221,34 @@ All settings live in `pondhawk.project.json`:
 - **Mode** — `Always` overwrites every run; `SkipExisting` writes once and then leaves the file alone.
 - **AppliesTo** — restricts a template to top-level nodes of one `Kind`. Omit for all.
 - **Model** — the model file this template reads. Omit for `model.json`.
+- **Partials** — top level, not per template. Liquid files whose macros every template shares.
 - **Values** — anything templates need, as `{{ values.X }}`. String values support `${VAR}` substitution from `.env`.
 
 Rendered output paths are confined to `OutputDir`. A node name containing `..` or a leading separator is refused rather than written elsewhere, and `generate` returns `Success: false` with the offending file listed.
+
+### Sharing macros between templates
+
+A macro written in a template belongs to that template, so several artifacts rendering the same
+Kinds each end up with their own copy of `DefaultProperty` — and the moment those drift, the
+fleet stops being uniform in exactly the way this tool exists to prevent. Put them in a shared
+file instead:
+
+```json
+{ "Partials": ["templates/_macros.liquid"] }
+```
+
+Partials are joined onto the front of every template before parsing, in the order listed, with
+the template last — so a template declaring the same macro shadows the shared one. A
+project-wide default, overridable per artifact.
+
+Liquid's `{% include %}` does not work for this, and deliberately is not wired up: Fluid renders
+an include in a child scope, so a macro declared in the included file is discarded before
+`{% dispatch %}` looks for it. The include succeeds, the macro is not found, and an error
+comment lands in the generated file — a silent-looking failure of exactly the kind the rest of
+this tool works to eliminate.
+
+One edit to a shared macro changes every artifact that uses it. Run `generate` with
+`dryRun: true` to see how far it reaches before accepting it.
 
 ### More than one model
 

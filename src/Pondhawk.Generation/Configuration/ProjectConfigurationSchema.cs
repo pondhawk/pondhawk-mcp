@@ -40,6 +40,11 @@ public static class ProjectConfigurationSchema
               "type": "object",
               "description": "Project-wide values available to every template as {{ values.X }}. String values support ${VAR} substitution from .env."
             },
+            "Partials": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Liquid files whose macros every template shares, applied in order ahead of each template. A template declaring the same macro shadows the shared one."
+            },
             "Overrides": {
               "type": "array",
               "description": "Rules that change how matched nodes render for a given artifact.",
