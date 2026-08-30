@@ -94,7 +94,7 @@ public sealed partial class TemplateEngine
 
             if (obj is not Node node)
             {
-                await writer.WriteAsync($"/* dispatch error: expected a model node, got '{obj?.GetType().Name ?? "nothing"}' */");
+                Fail(context, $"expected a model node, got '{obj?.GetType().Name ?? "nothing"}'");
                 return Fluid.Ast.Completion.Normal;
             }
 
@@ -130,12 +130,53 @@ public sealed partial class TemplateEngine
                 }
                 else
                 {
-                    await writer.WriteAsync($"/* dispatch error: macro '{macroName}' not found */");
+                    Fail(context,
+                        $"node '{node.Name}' of Kind '{node.Kind}' found no macro '{macroName}'"
+                        + (macroName == defaultName ? "" : $" and no fallback '{defaultName}'"));
                 }
             }
 
             return Fluid.Ast.Completion.Normal;
         });
+    }
+
+    /// <summary>Ambient key under which a render accumulates its dispatch failures.</summary>
+    private const string DispatchErrorsKey = "DispatchErrors";
+
+    /// <summary>
+    /// Records a dispatch failure against the render in progress.
+    /// </summary>
+    /// <remarks>
+    /// This used to write a comment into the output instead — which left the run reporting
+    /// Success with a broken file on disk, and hardcoded C# comment syntax into a tool that is
+    /// meant to know nothing about the target language. Errors are collected rather than thrown
+    /// on the spot so that one pass reports every bad node in a file: a Kind missing its macro
+    /// is usually wrong for all of them at once, and fixing those one exception at a time is
+    /// needless work.
+    /// </remarks>
+    private static void Fail(TemplateContext context, string message)
+    {
+        if (context.AmbientValues.TryGetValue(DispatchErrorsKey, out var value) && value is List<string> errors)
+            errors.Add(message);
+    }
+
+    /// <summary>
+    /// Renders, then fails if dispatch could not resolve something. Nothing is returned to be
+    /// written unless the whole document rendered correctly.
+    /// </summary>
+    private static string Complete(string output, TemplateContext context)
+    {
+        if (!context.AmbientValues.TryGetValue(DispatchErrorsKey, out var value)
+            || value is not List<string> { Count: > 0 } errors)
+        {
+            return output;
+        }
+
+        throw new InvalidOperationException(
+            errors.Count == 1
+                ? $"Dispatch failed: {errors[0]}."
+                : $"Dispatch failed for {errors.Count} nodes:{Environment.NewLine}  - "
+                  + string.Join($"{Environment.NewLine}  - ", errors));
     }
 
     public bool TryParse(string source, out IFluidTemplate template, out string? error)
@@ -163,6 +204,11 @@ public sealed partial class TemplateEngine
         RegisterModelAccess(options);
 
         var context = new TemplateContext(options);
+
+        // Every render carries its own collector, so failures belong to one file and never
+        // leak into the next one's result.
+        context.AmbientValues[DispatchErrorsKey] = new List<string>();
+
         return context;
     }
 
@@ -227,11 +273,11 @@ public sealed partial class TemplateEngine
 
     public string Render(IFluidTemplate template, TemplateContext context)
     {
-        return template.Render(context);
+        return Complete(template.Render(context), context);
     }
 
     public async Task<string> RenderAsync(IFluidTemplate template, TemplateContext context)
     {
-        return await template.RenderAsync(context);
+        return Complete(await template.RenderAsync(context), context);
     }
 }

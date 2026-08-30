@@ -261,6 +261,10 @@ All settings live in `pondhawk.project.json`:
 - **Partials** — top level, not per template. Liquid files whose macros every template shares.
 - **Values** — anything templates need, as `{{ values.X }}`. String values support `${VAR}` substitution from `.env`.
 
+A node whose `Kind` resolves to no macro fails its file rather than marking it: the file is not
+written, `generate` counts it under `Failed`, and `Success` is false. Every unresolved node in
+one file is reported together. Nothing partial or annotated reaches disk.
+
 Rendered output paths are confined to `OutputDir`. A node name containing `..` or a leading separator is refused rather than written elsewhere, and `generate` returns `Success: false` with the offending file listed.
 
 ### Sharing macros between templates

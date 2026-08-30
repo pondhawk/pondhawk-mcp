@@ -113,20 +113,76 @@ public class DispatchTagTests
     }
 
     [Fact]
-    public void Dispatch_MissingMacroEntirely_EmitsAnInlineError()
+    public void Dispatch_MissingMacroEntirely_FailsTheRender()
     {
-        Render("{% dispatch item %}", new Node { Name = "Orders", Kind = "Class" })
-            .ShouldContain("dispatch error");
+        // This used to write a comment into the output, which left the run reporting success
+        // over a broken file — and hardcoded C# comment syntax into a language-agnostic tool.
+        var error = Should.Throw<InvalidOperationException>(
+            () => Render("{% dispatch item %}", new Node { Name = "Orders", Kind = "Class" }));
+
+        error.Message.ShouldContain("Orders");
+        error.Message.ShouldContain("Class");
+        error.Message.ShouldContain("DefaultClass");
     }
 
     [Fact]
-    public void Dispatch_NonNodeValue_EmitsAnInlineError()
+    public void Dispatch_NonNodeValue_FailsTheRender()
     {
         _engine.TryParse("{% dispatch thing %}", out var template, out _).ShouldBeTrue();
         var ctx = _engine.CreateContext();
         ctx.SetValue("thing", FluidValue.Create("just a string", ctx.Options));
         ctx.AmbientValues["ArtifactName"] = "entity";
 
-        _engine.Render(template, ctx).ShouldContain("dispatch error");
+        Should.Throw<InvalidOperationException>(() => _engine.Render(template, ctx))
+            .Message.ShouldContain("expected a model node");
+    }
+
+    [Fact]
+    public void Dispatch_ReportsEveryBadNodeInOnePass()
+    {
+        // A Kind missing its macro is usually wrong for every node of that Kind at once.
+        // Reporting them one exception at a time would make fixing it needless work.
+        var parent = new Node
+        {
+            Name = "Product",
+            Kind = "Class",
+            Children =
+            [
+                new Node { Name = "Id", Kind = "Property" },
+                new Node { Name = "Price", Kind = "Property" },
+                new Node { Name = "Tag", Kind = "Attribute" }
+            ]
+        };
+
+        var error = Should.Throw<InvalidOperationException>(() => Render(
+            "{%- for c in item.Children %}{% dispatch c %}{%- endfor %}", parent));
+
+        error.Message.ShouldContain("3 nodes");
+        error.Message.ShouldContain("Id");
+        error.Message.ShouldContain("Price");
+        error.Message.ShouldContain("Tag");
+    }
+
+    [Fact]
+    public void Dispatch_MissingVariantStillFallsBackToTheDefault()
+    {
+        // The fallback is deliberate and stays. Only a node with neither macro fails.
+        var node = new Node { Name = "Price", Kind = "Property" };
+        node.SetVariant("entity", "Currency");
+
+        Render("{%- macro DefaultProperty(p) %}DEFAULT:{{ p.Name }}{%- endmacro %}{% dispatch item %}",
+                node, artifact: "entity")
+            .ShouldBe("DEFAULT:Price");
+    }
+
+    [Fact]
+    public void Dispatch_ErrorsDoNotLeakBetweenRenders()
+    {
+        Should.Throw<InvalidOperationException>(
+            () => Render("{% dispatch item %}", new Node { Name = "A", Kind = "Class" }));
+
+        Render("{%- macro DefaultClass(c) %}ok{%- endmacro %}{% dispatch item %}",
+                new Node { Name = "B", Kind = "Class" })
+            .ShouldBe("ok");
     }
 }

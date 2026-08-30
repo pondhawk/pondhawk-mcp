@@ -171,6 +171,37 @@ public class DryRunAndCheckTests : IDisposable
         predicted.GetProperty("WouldCreate").GetInt32().ShouldBe(actual.GetProperty("Created").GetInt32());
     }
 
+    [Fact]
+    public void Generate_ADispatchFailure_IsAFailedFileNotASuccessfulBrokenOne()
+    {
+        // A missing macro used to leave a comment in the output while the run reported
+        // success. It is now an ordinary per-file failure: nothing written, Success false,
+        // and the well-behaved siblings unaffected.
+        File.WriteAllText(Path.Combine(_tempDir, "model.json"), """
+            {
+              "Name": "Catalog",
+              "Nodes": [
+                { "Name": "Product",  "Kind": "Class",  "Children": [ { "Name": "Id", "Kind": "Property" } ] },
+                { "Name": "Fine",     "Kind": "Class",  "Children": [] }
+              ]
+            }
+            """);
+
+        var result = Json(GenerateTool.Execute(
+            Configure("{%- for c in item.Children %}{% dispatch c %}{%- endfor %}ok")));
+
+        result.GetProperty("Success").GetBoolean().ShouldBeFalse();
+        result.GetProperty("Failed").GetInt32().ShouldBe(1);
+        result.GetProperty("Created").GetInt32().ShouldBe(1);
+
+        File.Exists(Path.Combine(_outputDir, "Product.cs")).ShouldBeFalse("a file that failed to render must not be written");
+        File.Exists(Path.Combine(_outputDir, "Fine.cs")).ShouldBeTrue();
+
+        Files(result, "FilesWritten")
+            .First(f => f.GetProperty("Action").GetString() == "Failed")
+            .GetProperty("Error").GetString()!.ShouldContain("DefaultProperty");
+    }
+
     // --- check ---------------------------------------------------------------
 
     [Fact]

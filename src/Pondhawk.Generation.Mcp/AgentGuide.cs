@@ -188,8 +188,8 @@ public static class AgentGuide
 
         Do not reach for Liquid's `{% include %}` for this. Fluid renders an include in a child
         scope, so a macro declared in the included file is discarded before `{% dispatch %}`
-        looks for it — the include succeeds, the macro is not found, and an error comment lands
-        in the generated file. `Partials` is the mechanism that works.
+        looks for it — the include succeeds, the macro is not found, and the file fails to
+        render. `Partials` is the mechanism that works.
 
         One edit to a shared macro changes every artifact that uses it, which is the point and
         also the risk: run `generate` with `dryRun: true` afterwards and read the diffs.
@@ -350,8 +350,9 @@ public static class AgentGuide
           the set stops being uniform. The same goes for metadata keys: if existing properties
           carry `Type`, do not introduce `DataType`.
         - **A new Kind needs a new macro.** `{% dispatch %}` on a Kind with no
-          `Default<Kind>` macro emits an error comment into the generated file rather than
-          failing the run, so it is easy to miss.
+          `Default<Kind>` macro fails the file: it is not written, `generate` counts it under
+          `Failed`, and `Success` is false. Every unresolved node in that file is reported at
+          once, so a Kind missing its macro is one message rather than a queue of them.
         - **A misspelled `Variant` renders the default.** Dispatch falls back to
           `Default<Kind>` when `<Variant><Kind>` does not exist, so the file looks right and
           silently ignores the override. `validate_config` now reports this as an error.
@@ -384,7 +385,10 @@ public static class AgentGuide
            `WouldSkipEmpty` rather than vanishing, and a metadata key that resolves to nothing
            shows up as a hole in the diff.
         6. Run `generate`.
-        7. Check `Success` in the result, then read a generated file.
+        7. Check `Success` in the result, then read a generated file. A file that could not be
+           rendered is never written — a broken artifact does not reach disk — but an empty
+           render still writes nothing quietly, and an unknown metadata key still renders as
+           nothing rather than failing.
 
         Steps 4 to 6 are cheap and the model is cached between calls, so run them as often as
         you like while iterating.
