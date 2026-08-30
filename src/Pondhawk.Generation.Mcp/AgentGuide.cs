@@ -316,7 +316,7 @@ public static class AgentGuide
 
         | Tool | Purpose |
         |------|---------|
-        | `init` | Scaffolds a new project |
+        | `init` | Scaffolds a new project. Its example templates render Markdown and exist to show the mechanics, not to be edited into your real ones |
         | `generate` | Renders templates and writes files; `dryRun: true` reports what would change instead |
         | `check` | Reports whether the files on disk are what the model and templates produce |
         | `prune` | Removes generated files the model no longer produces. Reports unless told to apply |

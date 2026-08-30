@@ -127,4 +127,38 @@ public class TemplateRenderingTests
 
         _engine.Render(template, ctx).Trim().ShouldBe("Id;Price;");
     }
+
+    [Fact]
+    public void ValidateFilterNames_IgnoresPipesOutsideLiquid()
+    {
+        // A Markdown table's column separators are not filters. Scanning the whole source
+        // reported three unknown filters for this line, on a template that is entirely correct.
+        TemplateEngine.ValidateFilterNames("| Field | Required | Description |").ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void ValidateFilterNames_IgnoresOtherPipeBearingContent()
+    {
+        TemplateEngine.ValidateFilterNames("SELECT a || b FROM t;").ShouldBeEmpty();
+        TemplateEngine.ValidateFilterNames("cat foo | grep bar").ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void ValidateFilterNames_StillCatchesATypoInsideLiquid()
+    {
+        TemplateEngine.ValidateFilterNames("{{ item.Name | pascal_kase }}").ShouldBe(["pascal_kase"]);
+    }
+
+    [Fact]
+    public void ValidateFilterNames_AcceptsKnownFiltersInsideLiquid()
+    {
+        TemplateEngine.ValidateFilterNames("{{ item.Name | pascal_case | upcase }}").ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void ValidateFilterNames_LooksInsideTagsAsWellAsOutput()
+    {
+        TemplateEngine.ValidateFilterNames("{% if item.Name | nonsense %}x{% endif %}")
+            .ShouldBe(["nonsense"]);
+    }
 }

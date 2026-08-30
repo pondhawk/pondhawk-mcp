@@ -139,14 +139,16 @@ When several overrides match one node, the one with the **most literal path segm
 ### 2. Scaffold a project
 
 ```
-Initialize a pondhawk project with namespace MyApp.Data
+Initialize a pondhawk project
 ```
 
-The `init` tool creates `pondhawk.project.json`, a starter `model.json`, example templates, JSON schemas for IDE autocompletion, `AGENTS.md`, and `.env`.
+`init` creates `pondhawk.project.json`, a starter `model.json`, two example templates, JSON schemas for IDE autocompletion, `AGENTS.md`, and `.env`.
+
+The examples render Markdown, and deliberately so. They exist to demonstrate the mechanics — a macro per Kind, `{% dispatch %}`, a filter, a config value, and the two-file pattern — in a format that is nobody's real target. A scaffold that looked like C# would be a starter template pack by another name: frozen at the moment the binary was built, and inviting you to edit it into production rather than replace it. Run `generate` once to watch it work, then write templates for your own target.
 
 ### 3. Describe what to generate
 
-Edit `model.json`, then author templates with one `Default<Kind>` macro per kind.
+Replace the starter nodes and their Kinds with your own, then author templates with one `Default<Kind>` macro per Kind.
 
 ### 4. Generate
 
@@ -160,7 +162,7 @@ Validate the config, then generate
 
 | Tool | Description |
 |------|-------------|
-| `init` | Scaffolds a new project with config, model, templates, schemas, and AGENTS.md |
+| `init` | Scaffolds a new project: config, a starter model, two Markdown example templates demonstrating the mechanics, schemas, and AGENTS.md |
 | `generate` | Renders templates against the model and writes files; `dryRun: true` reports what would change instead, with unified diffs, and writes nothing |
 | `check` | Reports whether the files on disk are what the model and templates currently produce, and lists orphans |
 | `prune` | Removes generated files the model no longer produces; reports unless passed `apply` |
@@ -231,24 +233,24 @@ All settings live in `pondhawk.project.json`:
 ```json
 {
   "$schema": "./pondhawk.project.schema.json",
-  "OutputDir": "src/Generated",
+  "OutputDir": "generated",
   "Templates": {
-    "entity": {
-      "Path": "templates/entity.generated.liquid",
-      "OutputPattern": "{{ item.Name | pascal_case }}.generated.cs",
+    "reference": {
+      "Path": "templates/reference.liquid",
+      "OutputPattern": "{{ item.Name | pascal_case }}.generated.md",
       "Scope": "PerItem",
       "Mode": "Always",
-      "AppliesTo": "Class"
+      "AppliesTo": "Section"
     },
-    "entity-stub": {
-      "Path": "templates/entity.stub.liquid",
-      "OutputPattern": "{{ item.Name | pascal_case }}.cs",
+    "notes": {
+      "Path": "templates/notes.liquid",
+      "OutputPattern": "{{ item.Name | pascal_case }}.notes.md",
       "Scope": "PerItem",
       "Mode": "SkipExisting",
-      "AppliesTo": "Class"
+      "AppliesTo": "Section"
     }
   },
-  "Values": { "Namespace": "MyApp.Data" },
+  "Values": { "Owner": "MyTeam" },
   "Overrides": [],
   "Logging": { "Enabled": false }
 }

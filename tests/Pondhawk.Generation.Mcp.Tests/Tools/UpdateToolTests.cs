@@ -58,10 +58,10 @@ public class UpdateToolTests : IDisposable
         var ctx = new ServerContext(_tempDir);
         InitTool.Execute(ctx);
 
-        // Manually add AppliesTo to a template in the config
+        // Change a template field in the config
         ctx = new ServerContext(_tempDir);
         var config = ctx.EnsureConfig();
-        config.Templates["entity"].AppliesTo = "Class";
+        config.Templates["reference"].AppliesTo = "Chapter";
         ProjectConfigurationLoader.Save(ctx.ConfigPath, config);
 
         // Run update (normalizes config via round-trip)
@@ -71,7 +71,7 @@ public class UpdateToolTests : IDisposable
         // Verify AppliesTo survived the round-trip
         ctx = new ServerContext(_tempDir);
         var reloaded = ctx.EnsureConfig();
-        reloaded.Templates["entity"].AppliesTo.ShouldBe("Class");
+        reloaded.Templates["reference"].AppliesTo.ShouldBe("Chapter");
     }
 
     [Fact]

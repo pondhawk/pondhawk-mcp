@@ -125,6 +125,23 @@ belong is a product call:
   output. Generated code that does not match project convention is permanent diff noise. But
   it means shelling out arbitrary commands, which is a real security surface for an MCP
   server.
-- **Starter template packs** — `init --preset csharp-entities`. Every new user currently
-  begins at a blank Liquid file, which is the steepest part of adoption, but presets give the
-  tool opinions about targets.
+- ~~**Starter template packs**~~ — **decided: no**, and `init` was corrected to match.
+
+  An LLM writes Liquid for today's target, informed by this project's own conventions, which
+  `describe_model` and `Partials` exist to expose. A shipped pack writes whatever was idiomatic
+  when the binary was compiled, knows nothing about the project, and carries a confident label
+  saying otherwise. It would freeze target conventions — file-scoped namespaces, records,
+  nullable reference types — against a binary that versions independently of the language, and
+  drift into output that compiles and looks plausible, which is the failure mode the rest of
+  this work exists to eliminate.
+
+  A `language` parameter is worse, not lighter: N sets of frozen conventions instead of one, an
+  obligation to cover the next language asked for, and the contradiction written into the tool
+  signature directly beneath "knows nothing about any particular target".
+
+  `init` was itself a starter pack under another name — it scaffolded `public partial class`,
+  `namespace`, `{ get; set; }` and `.cs`, a holdover from the database-schema focus. It now
+  scaffolds Markdown with `Section`/`Field` Kinds. The neutrality is the mechanism, not a
+  compromise: a C#-shaped example invites editing into production, whereas an example in a
+  format nobody ships invites replacement, which is what keeps one example from becoming a
+  pack.

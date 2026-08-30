@@ -12,15 +12,13 @@ namespace Pondhawk.Generation.Mcp.Tools;
 [McpServerToolType]
 public sealed class InitTool
 {
-    [McpServerTool(Name = "init"), Description("Scaffolds a new pondhawk project: pondhawk.project.json, a starter model.json, example Liquid templates, JSON schemas, AGENTS.md, and .env. Returns the list of files created. Fails if the project is already initialized.")]
+    [McpServerTool(Name = "init"), Description("Scaffolds a new pondhawk project: pondhawk.project.json, a starter model.json, two example Liquid templates, JSON schemas, AGENTS.md, and .env. The examples generate Markdown and exist to demonstrate the mechanics — dispatch, macros, the two-file pattern — not to be a starting point for your real templates. Write those for your own target. Returns the list of files created. Fails if the project is already initialized.")]
     public static string Execute(
         ServerContext ctx,
         [Description("Project name, recorded in the config and available as {{ model.Name }}. Default: MyProject")]
         string projectName = "MyProject",
-        [Description("Root directory for generated files, relative to the project. Default: src/Generated")]
-        string outputDir = "src/Generated",
-        [Description("Value bound to {{ values.Namespace }} in the example templates. Default: MyProject.Generated")]
-        string @namespace = "MyProject.Generated")
+        [Description("Root directory for generated files, relative to the project. Default: generated")]
+        string outputDir = "generated")
     {
         var (logger, sw) = ctx.StartToolCall("init", $"projectName={projectName}");
         var configPath = ctx.ConfigPath;
@@ -38,26 +36,26 @@ public sealed class InitTool
             OutputDir = outputDir,
             Templates = new Dictionary<string, TemplateConfig>
             {
-                ["entity"] = new()
+                ["reference"] = new()
                 {
-                    Path = "templates/entity.generated.liquid",
-                    OutputPattern = "{{ item.Name | pascal_case }}.generated.cs",
+                    Path = "templates/reference.liquid",
+                    OutputPattern = "{{ item.Name | pascal_case }}.generated.md",
                     Scope = "PerItem",
                     Mode = "Always",
-                    AppliesTo = "Class"
+                    AppliesTo = "Section"
                 },
-                ["entity-stub"] = new()
+                ["notes"] = new()
                 {
-                    Path = "templates/entity.stub.liquid",
-                    OutputPattern = "{{ item.Name | pascal_case }}.cs",
+                    Path = "templates/notes.liquid",
+                    OutputPattern = "{{ item.Name | pascal_case }}.notes.md",
                     Scope = "PerItem",
                     Mode = "SkipExisting",
-                    AppliesTo = "Class"
+                    AppliesTo = "Section"
                 }
             },
             Values = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
             {
-                ["Namespace"] = @namespace
+                ["Owner"] = "MyTeam"
             },
             Logging = new LoggingConfig { Enabled = false }
         };
@@ -73,8 +71,8 @@ public sealed class InitTool
 
         var templatesDir = Path.Combine(ctx.ProjectDir, "templates");
         Directory.CreateDirectory(templatesDir);
-        File.WriteAllText(Path.Combine(templatesDir, "entity.generated.liquid"), GetGeneratedTemplate(), utf8NoBom);
-        File.WriteAllText(Path.Combine(templatesDir, "entity.stub.liquid"), GetStubTemplate(), utf8NoBom);
+        File.WriteAllText(Path.Combine(templatesDir, "reference.liquid"), GetGeneratedTemplate(), utf8NoBom);
+        File.WriteAllText(Path.Combine(templatesDir, "notes.liquid"), GetStubTemplate(), utf8NoBom);
 
         File.WriteAllText(Path.Combine(ctx.ProjectDir, "AGENTS.md"), AgentGuide.Markdown, utf8NoBom);
 
@@ -93,8 +91,8 @@ public sealed class InitTool
             "model.schema.json",
             "AGENTS.md",
             ".env",
-            "templates/entity.generated.liquid",
-            "templates/entity.stub.liquid",
+            "templates/reference.liquid",
+            "templates/notes.liquid",
             ".pondhawk/.gitignore"
         };
 
@@ -104,23 +102,33 @@ public sealed class InitTool
         return JsonSerializer.Serialize(new
         {
             FilesCreated = filesCreated,
-            NextSteps = "Read AGENTS.md. Edit model.json to describe what to generate, adjust the templates, then run generate."
+            NextSteps = "Read AGENTS.md, then run generate to see the example work end to end. The example templates render Markdown and are there to show the mechanics; replace them with templates for your own target rather than editing them into shape."
         });
     }
 
+    /// <summary>
+    /// A starter model deliberately not shaped like any particular target.
+    /// </summary>
+    /// <remarks>
+    /// Section and Field carry no language baggage — they read equally as a form, a config
+    /// schema, a struct or a document — which is the point. A scaffold that looked like C#
+    /// entities would be a starter template pack by another name: it would freeze whatever was
+    /// idiomatic when this binary was built, and invite editing into production rather than
+    /// replacing.
+    /// </remarks>
     private static string GetStarterModel(string projectName) => $$"""
         {
           "$schema": "./model.schema.json",
           "Name": "{{projectName}}",
           "Nodes": [
             {
-              "Name": "Product",
-              "Kind": "Class",
-              "Note": "Replace this with your own nodes.",
+              "Name": "Example",
+              "Kind": "Section",
+              "Description": "A placeholder node. Replace it, and its Kinds, with your own.",
               "Children": [
-                { "Name": "Id",    "Kind": "Property", "Type": "int",     "IsNullable": false },
-                { "Name": "Name",  "Kind": "Property", "Type": "string",  "IsNullable": false },
-                { "Name": "Price", "Kind": "Property", "Type": "decimal", "IsNullable": false }
+                { "Name": "Id",    "Kind": "Field", "Required": true,  "Description": "Unique identifier" },
+                { "Name": "Title", "Kind": "Field", "Required": true,  "Description": "Display name" },
+                { "Name": "Notes", "Kind": "Field", "Required": false, "Description": "Free text" }
               ]
             }
           ]
@@ -128,36 +136,41 @@ public sealed class InitTool
 
         """;
 
+    /// <summary>
+    /// The Always half of the two-file pair. Demonstrates a macro per Kind, dispatch at both
+    /// levels, a filter and a config value — the mechanics, in a format nobody ships.
+    /// </summary>
     private static string GetGeneratedTemplate() => """
-        // <auto-generated>
-        // This file was generated by pondhawk. Do not edit manually.
-        // Any changes will be overwritten on next generation.
-        // </auto-generated>
+        {%- macro DefaultSection(s) -%}
+        # {{ s.Name | pascal_case }}
 
-        namespace {{ values.Namespace }};
-        {%- macro DefaultClass(c) %}
-        public partial class {{ c.Name | pascal_case }}
-        {%- endmacro %}
-        {%- macro DefaultProperty(p) %}
-            public {{ p.Type | type_nullable: p.IsNullable }} {{ p.Name | pascal_case }} { get; set; }
-        {%- endmacro %}
+        {{ s.Description }}
+        {%- endmacro -%}
+        {%- macro DefaultField(f) -%}
+        | {{ f.Name }} | {% if f.Required %}yes{% else %}no{% endif %} | {{ f.Description }} |
+        {%- endmacro -%}
+        <!-- Generated by pondhawk. Rewritten on every run: edit the template, not this file. -->
+
         {% dispatch item %}
-        {
-        {%- for p in item.Children %}
-        {%- dispatch p %}
-        {%- endfor %}
-        }
+
+        | Field | Required | Description |
+        | ----- | -------- | ----------- |
+        {% for f in item.Children %}{% dispatch f %}
+        {% endfor %}
+        Maintained by {{ values.Owner }}.
 
         """;
 
+    /// <summary>
+    /// The SkipExisting half. Written once and then owned by whoever edits it — run generate
+    /// twice and the pair reports Unchanged and SkippedExisting, which is the clearest way to
+    /// see what Mode does.
+    /// </summary>
     private static string GetStubTemplate() => """
-        namespace {{ values.Namespace }};
+        # {{ item.Name | pascal_case }} — notes
 
-        // Hand-written half of {{ item.Name | pascal_case }}. Created once and never overwritten —
-        // put custom logic, computed members and validation here.
-        public partial class {{ item.Name | pascal_case }}
-        {
-        }
+        Hand-written notes about {{ item.Name | pascal_case }}. Created once and never
+        overwritten: this file is yours.
 
         """;
 

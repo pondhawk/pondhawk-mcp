@@ -28,6 +28,10 @@ public sealed partial class TemplateEngine
     [GeneratedRegex(@"\|\s*(\w+)", RegexOptions.Compiled)]
     private static partial Regex FilterUsageRegex();
 
+    /// <summary>Liquid output and tag regions — the only places a filter can appear.</summary>
+    [GeneratedRegex(@"\{\{.*?\}\}|\{%.*?%\}", RegexOptions.Compiled | RegexOptions.Singleline)]
+    private static partial Regex LiquidRegionRegex();
+
     [GeneratedRegex(@"\{%-?\s*macro\s+(\w+)\s*\(", RegexOptions.Compiled)]
     private static partial Regex MacroDeclarationRegex();
 
@@ -51,18 +55,31 @@ public sealed partial class TemplateEngine
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Validates filter names in a template source string. Returns a list of unknown filter names.
-    /// Uses regex-based extraction so may have false positives in string literals.
+    /// Unknown filter names used in a template.
     /// </summary>
+    /// <remarks>
+    /// Only the text inside {{ }} and {% %} is examined. A pipe elsewhere is ordinary document
+    /// content, not a filter — this used to scan the whole source, so a Markdown table's column
+    /// separators, a SQL `||`, or a shell pipe were each reported as three or four unknown
+    /// filters on a perfectly good template. A warning list that fires on correct input stops
+    /// being read.
+    ///
+    /// Still approximate within those regions: a pipe inside a quoted string argument would
+    /// read as a filter. That direction is the safe one — a stray warning about something that
+    /// really is Liquid beats silence about a genuine typo.
+    /// </remarks>
     public static List<string> ValidateFilterNames(string templateSource)
     {
         var unknown = new List<string>();
-        foreach (Match match in FilterUsageRegex().Matches(templateSource))
+
+        foreach (Match region in LiquidRegionRegex().Matches(templateSource))
+        foreach (Match match in FilterUsageRegex().Matches(region.Value))
         {
             var filterName = match.Groups[1].Value;
             if (!KnownFilters.Contains(filterName))
                 unknown.Add(filterName);
         }
+
         return unknown.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
     }
 
