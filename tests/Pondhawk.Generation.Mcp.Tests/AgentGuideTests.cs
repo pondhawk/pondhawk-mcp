@@ -120,6 +120,15 @@ public class AgentGuideTests
     }
 
     [Fact]
+    public void Guide_ShowsHowToRunTheCheckFromAShell()
+    {
+        // Telling a project to gate CI on the check is useless advice if taking it requires
+        // writing an MCP client.
+        AgentGuide.Markdown.ShouldContain("--project . --check");
+        AgentGuide.Markdown.ShouldContain("0 clean, 1 not clean, 2 could not run");
+    }
+
+    [Fact]
     public void ServerInstructions_StandAloneWithoutTheFullGuide()
     {
         // A client that reads no resource and opens no file still has to be able to work.

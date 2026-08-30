@@ -6,12 +6,15 @@ gets lost.
 
 Status: `[ ]` not started · `[~]` in progress · `[x]` done
 
+**All five are done.** Below the line are the enforcement path and the adjacent features that
+were considered and declined.
+
 ---
 
-## 1. Dry run and drift
+## 1. Dry run and drift — **done**
 
-`[ ]` **`generate(dryRun: true)`** — render to memory, diff against disk, write nothing.
-`[ ]` **`check`** — is the checked-in generated code what the model currently produces?
+`[x]` **`generate(dryRun: true)`** — render to memory, diff against disk, write nothing.
+`[x]` **`check`** — is the checked-in generated code what the model currently produces?
 
 One engine, two tools. Render-to-memory plus compare-to-disk answers both questions; they
 differ only in who is asking and what shape of answer they want.
@@ -23,12 +26,14 @@ two quiet failures the guide warns about — a template that renders empty, a me
 renders as nothing — *visible* rather than merely documented. `check` is the CI gate: it tells
 an agent that just pulled a branch whether the generated tree is stale.
 
-**Prerequisite.** Output must be byte-stable across runs or both features are noise. Audit for
-timestamps, machine paths, and any non-deterministic ordering before building on it.
+**Prerequisite — checked.** Output is byte-stable: the render path holds no timestamps, machine
+paths or clock reads, and nodes are an ordered list. The one way to break it is a date filter in
+a template, which is the author's choice rather than something to prevent.
 
-**Constraint.** The dry run must resolve output paths through the same code as the real write,
-including the escape refusal — a preview that shows a file the real run would reject is worse
-than no preview.
+**Constraint — met.** Both paths go through `GenerationPlanner` for rendering and path
+resolution and `FileWriter.Decide` for the create/overwrite/skip decision, so a preview cannot
+disagree with the run it previews. A test pins the prediction against the real run that follows
+it.
 
 ## 2. A manifest — **done**
 
@@ -91,12 +96,20 @@ per-template question, and a single global answer would be confidently wrong for
 with more than one template — and would also false-alarm on Kinds rendered directly by a
 template body rather than through dispatch.
 
-## 5. `preview`
+## 5. `preview` — **done**
 
-`[ ]` Render one node through one template, return the string, write nothing.
+`[x]` Render one node through one template, return the string, write nothing.
 
-**Why.** The template authoring loop is currently generate → read a file off disk. This is the
-tight one, and everything it needs already exists.
+**Why.** The template authoring loop was generate → read a file off disk: ceremony and leftover
+artifacts for one answer.
+
+**Built over the planner** rather than as a second rendering path — filtered to one template and
+one node it does exactly this job, so a preview cannot drift from the run it previews. A test
+pins its output against what `generate` then writes.
+
+Errors return rather than throw, since a half-finished macro is the normal state while writing
+one, and the three ways nothing renders — unknown node, an `AppliesTo` matching no Kind, an
+`Ignore` override — are reported as three different messages rather than one empty result.
 
 ---
 
@@ -114,6 +127,22 @@ renamed into place, so a crash leaves the old file or the new one and never a mi
 already completes to a string before any write begins, so this closed the last route by which a
 partial file could reach disk. The manifest already wrote this way; the generated files did not,
 which was backwards.
+
+## The enforcement path
+
+Three layers keep a project actually using the generator, and only the last one holds:
+
+1. **Handshake instructions** answer "it was simpler to do it myself" — the reasoning error.
+   Effective at connect time, decaying from there.
+2. **`AGENTS.md` project preamble** answers "I forgot" — the salience problem. It lives in the
+   repository, where the mistake gets made.
+3. **`--check` in CI** answers neither and does not need to: it is the only layer that survives
+   an agent having a bad day.
+
+The third was advice a build script could not take until the binary grew a `--check` mode. It
+only spoke MCP over stdio, so running the check meant writing a client. It now runs from a shell
+and reports through an exit code — 0 clean, 1 not clean, 2 could not run, so a broken project
+and a dirty one stay distinguishable.
 
 ## Adjacent features, both declined
 

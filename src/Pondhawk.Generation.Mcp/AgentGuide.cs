@@ -525,6 +525,20 @@ public static class AgentGuide
         just generate. It writes nothing, reports every stale file with a reason — `Missing`,
         `InputsChanged`, `EditedSinceGenerated` — and lists orphans the manifest records but the
         configuration no longer produces. No diffs; use `generate` with `dryRun` for those. A
-        `SkipExisting` stub that exists is never stale, because `generate` would not touch it.
+        `SkipExisting` stub that exists is never stale, because `generate` would not touch it. It
+        also lists untracked files: things sitting in the output directory that pondhawk neither
+        produces nor has any record of writing, which is usually a file somebody hand-wrote where
+        a generated one belongs. `Clean` covers all of it.
+
+        The same check runs from a shell, so a project can fail its build on it without an MCP
+        client at all:
+
+        ```
+        pondhawk-generation-mcp --project . --check
+        ```
+
+        Exit code 0 clean, 1 not clean, 2 could not run. If you are setting a project up, put
+        that in its CI. Instructions persuade an agent not to hand-write generated files; a
+        failing build is what holds when one does anyway.
         """;
 }

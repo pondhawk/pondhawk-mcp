@@ -156,6 +156,12 @@ Replace the starter nodes and their Kinds with your own, then author templates w
 Validate the config, then generate
 ```
 
+To check generated files are current without a client — in CI, or after pulling a branch:
+
+```bash
+pondhawk-generation-mcp --project . --check
+```
+
 `validate_config` reports unparseable templates, unknown filters, a model violating its schema, overrides matching no node, templates whose `AppliesTo` matches no kind in the model, a Kind nested under what a template renders that has no `Default<Kind>` macro, and overrides naming a variant macro no template declares.
 
 ## MCP Tools
@@ -227,7 +233,27 @@ Three things keep that from eroding:
 - **`check`** makes bypassing it visible. Its `Clean` field covers stale files, orphans, and
   untracked files sitting in the output directory that pondhawk neither produces nor wrote —
   which is the shape of someone hand-writing a file where a generated one belongs. Gate CI on
-  `Clean`; documentation persuades, a failing build is what holds.
+  it; documentation persuades, a failing build is what holds.
+
+### Gating CI
+
+The server binary runs the check from a shell and reports through its exit code, so no MCP
+client is needed:
+
+```bash
+pondhawk-generation-mcp --project . --check
+```
+
+`0` clean, `1` not clean, `2` could not run — a broken project and a dirty one are different
+answers, and a build script should be able to tell them apart. In GitHub Actions:
+
+```yaml
+- name: Generated code is current
+  run: pondhawk-generation-mcp --project . --check
+```
+
+It fails on a stale file, a file edited after generation, a file the model no longer produces,
+and a file someone hand-wrote in the output directory.
 
 ## The manifest
 
