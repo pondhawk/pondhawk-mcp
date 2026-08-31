@@ -112,6 +112,18 @@ public class PreviewToolTests : IDisposable
     }
 
     [Fact]
+    public void ASingleScopeTemplate_NarrowsToANamedNode()
+    {
+        // Found by generating a real EF Core DbContext: previewing the Single-scope template
+        // for one entity showed one DbSet, not the whole file. That matches generate's items
+        // filter, so the behaviour is right — the tool description claimed it was ignored.
+        var ctx = Configure("{%- for i in items %}{{ i.Name }};{%- endfor %}", scope: "Single",
+            outputPattern: "All.cs");
+
+        Content(Json(PreviewTool.Execute(ctx, "entity", "Category"))).ShouldBe("Category;");
+    }
+
+    [Fact]
     public void ASingleScopeTemplate_RendersEveryMatchingNodeAtOnce()
     {
         var result = Json(PreviewTool.Execute(

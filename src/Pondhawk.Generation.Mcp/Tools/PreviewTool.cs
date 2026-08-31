@@ -25,7 +25,7 @@ public sealed class PreviewTool
         ServerContext ctx,
         [Description("Template key to render.")]
         string template,
-        [Description("Top-level node name to render. Default: the first node the template matches. Ignored by Single-scope templates, which render all of them at once.")]
+        [Description("Top-level node name to render. Omit it to render the first node the template matches, or — for a Single-scope template — all of them, which is what generate produces. Naming a node narrows a Single-scope render to just that node, the same way generate does with items; useful for inspecting one node's contribution, but not what the file will contain.")]
         string? node = null,
         [Description("Key-value pairs passed to the template context as {{ parameters.X }}")]
         Dictionary<string, object>? parameters = null)
